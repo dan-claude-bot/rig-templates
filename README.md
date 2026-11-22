@@ -30,7 +30,7 @@ role because it names the machine itself rather than a server purpose.
     claude-box/
     ├── template.env   KEY="value" data, parsed by rig against an allowlist,
     │                  NEVER sourced: USER, CONTEXT_PATH, CLI_NAME, CLI_SRC,
-    │                  PATH_LINE, NEEDS_NODE, APT_EXTRAS, AGENT, HARDEN_SSHD
+    │                  PATH_LINE, NEEDS_NODE, APT_EXTRAS, SWAP_SIZE, AGENT, HARDEN_SSHD
     ├── install.sh     the CLI install — the one deliberately executable part,
     │                  run by the mechanism AS ROOT with TENANT_USER /
     │                  TENANT_HOME / TENANT_GROUP / ROLE exported; it drops to
@@ -58,6 +58,13 @@ hardening independently of whether an agent is installed.
 Machine-role directories are traits-only: their `template.env` allowlist is
 `ROOT_DOOR`, `HOST`, and `JOIN`. They carry no `creds.md`; an `install.sh` is
 optional in the schema but absent from the built-in machine definitions.
+
+### Swap: `SWAP_SIZE`
+
+box lays no swapfile since 0.11.0 (heavy-duty/box#290), so the four agent
+roles and `staging-box` declare `SWAP_SIZE="4G"`: rig converges a `/swapfile`
+of that size on a VM (heavy-duty/rig#229) and skips a container. An
+unconverged box has no swap — that is box's stated cost, not this registry's.
 
 ### The agent tenants' shared `APT_EXTRAS` base
 
