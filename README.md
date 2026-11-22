@@ -71,9 +71,9 @@ apt command for a box that will never tick.
 
 `python3-venv shellcheck` are the agents' unprivileged toolchain (#38). Box's
 seed image carried them only because box#177 took the tenant's sudo away;
-box 0.11.0 (box#253) moves them here. Debian 13 ships no pip and marks the
-system Python externally managed, so an agent without sudo has no other way
-to a venv or a shell linter.
+box 0.11.0 (box#253) moves them here. The Debian 13 base image ships no pip
+and marks the system Python externally managed, so an agent without sudo has
+no other way to a venv or a shell linter.
 
 `test/agent-apt-extras.sh` holds that base, and CI runs it on every PR beside
 `rig template-lint` — never inside it, because rig owns its own schema and
@@ -86,7 +86,9 @@ The base is this registry stating what its tenants need, not the only thing
 that supplies it: rig's agent-tenant toolbelt installs `gh`, `jq` and `cron`
 itself and asserts `cron.service` is enabled and active (rig#162). The
 registry declaring its own requirement is what survives that toolbelt
-changing.
+changing. The toolchain half has no other supplier: rig's toolbelt installs
+neither `python3-venv` nor `shellcheck`, so this registry's `APT_EXTRAS` is
+the only way they reach a box.
 
 The same check holds the boundary the withdrawn `crew-box` rests on: a tenant
 gains crew's **packages** and never crew's **engine**. `~/duty` is

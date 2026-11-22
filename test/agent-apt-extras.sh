@@ -11,9 +11,11 @@
 #
 # The base also holds the agents' unprivileged toolchain, `python3-venv` and
 # `shellcheck` (#38). They were in box's seed image only because box#177 took
-# the tenant's sudo away, and box 0.11.0 (box#253) moves them out of box: Debian
-# 13 ships no pip and marks the system Python externally managed, so an agent
-# that cannot sudo has no other way to get a venv or a shell linter.
+# the tenant's sudo away, and box 0.11.0 (box#253) moves them out of box: the
+# Debian 13 base image ships no pip and marks the system Python externally
+# managed, so an agent that cannot sudo has no other way to get a venv or a
+# shell linter. rig's toolbelt installs neither, so this base is their only
+# supplier.
 #
 # Vendor additions layer ON TOP of the base: claude-box's `zsh` is a vendor
 # addition and stays one. What the check refuses is a tenant DROPPING a base
