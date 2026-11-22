@@ -61,12 +61,19 @@ optional in the schema but absent from the built-in machine definitions.
 
 ### The agent tenants' shared `APT_EXTRAS` base
 
-Every agent tenant declares `APT_EXTRAS="cron gh jq"`, plus whatever its
-vendor needs on top — `claude-box` carries `cron gh jq zsh`. Those three are
-the hard prerequisites of crew's box-side installer, which every agent tenant
-exists to run: it exits on a missing `gh` or `jq`, and a missing `crontab` is
-worse, because the install completes, *reports success*, and hands the
-operator an apt command for a box that will never tick.
+Every agent tenant declares `APT_EXTRAS="cron gh jq python3-venv shellcheck"`,
+plus whatever its vendor needs — `claude-box` carries
+`cron gh jq zsh python3-venv shellcheck`. `cron gh jq` are the hard
+prerequisites of crew's box-side installer, which every agent tenant exists to
+run: it exits on a missing `gh` or `jq`, and a missing `crontab` is worse,
+because the install completes, *reports success*, and hands the operator an
+apt command for a box that will never tick.
+
+`python3-venv shellcheck` are the agents' unprivileged toolchain (#38). Box's
+seed image carried them only because box#177 took the tenant's sudo away;
+box 0.11.0 (box#253) moves them here. Debian 13 ships no pip and marks the
+system Python externally managed, so an agent without sudo has no other way
+to a venv or a shell linter.
 
 `test/agent-apt-extras.sh` holds that base, and CI runs it on every PR beside
 `rig template-lint` — never inside it, because rig owns its own schema and
