@@ -15,10 +15,11 @@ Then converge from a root shell in the box (`box root staging-box`):
 
     rig bootstrap staging-box
 
-`template.env` names the tenant (`USER="ops"`), but rig does not create it:
-the user comes from the box seed, and rig stops with `user 'ops' does not
-exist` when it is missing. On a box whose seed did not make `ops`, create it
-first in that same root shell (`useradd -m ops`).
+`template.env` names the tenant (`USER="ops"`), and rig creates it when it is
+absent (heavy-duty/rig#230; box 0.11.0 seeds no users). `USER_SUDO="nopasswd"`
+gives `ops` the passwordless sudo a self-converging server keeps (box#177's
+other half), and `SWAP_SIZE="4G"` lays the swap box no longer does. All three
+need rig 0.4.1 or later.
 
 The tailnet workload join stays operator-run (`box root staging-box`, then
 `rig bootstrap workload-server`), because that step holds a credential.
