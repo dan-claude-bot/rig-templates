@@ -207,7 +207,7 @@ if [ "$CONVERGE" -eq 1 ]; then
 
   snapshot() { # the converged state, as text
     {
-      find /etc/gig /etc/garm /var/lib/garm /opt/gig /opt/garm /usr/local/bin \
+      find /etc/gig /etc/garm /var/lib/garm /var/lib/gig /opt/gig /opt/garm /usr/local/bin \
         /etc/systemd/system /etc/systemd/journald.conf.d -mindepth 0 2>/dev/null | sort |
         while IFS= read -r p; do
           if [ -L "$p" ]; then
@@ -256,7 +256,7 @@ if [ "$CONVERGE" -eq 1 ]; then
   check "/etc/gig is 0755 root, gig.yaml 0644" test "$(stat -c '%a %U %a' /etc/gig /etc/gig/gig.yaml | tr '\n' ' ')" = "755 root 755 644 root 644 "
   check "notify.env is empty, 0600 root:root" test "$(stat -c '%s %a %U:%G' /etc/gig/notify.env)" = "0 600 root:root"
   check "app-key.pem is empty, 0600 gig:gig" test "$(stat -c '%s %a %U:%G' /etc/garm/app-key.pem)" = "0 600 gig:gig"
-  check "/etc/garm and /var/lib/garm are 0750 gig:gig" test "$(stat -c '%a %U:%G' /etc/garm /var/lib/garm | sort -u)" = "750 gig:gig"
+  check "/etc/garm, /var/lib/garm and /var/lib/gig are 0750 gig:gig" test "$(stat -c '%a %U:%G' /etc/garm /var/lib/garm /var/lib/gig | sort -u)" = "750 gig:gig"
   check "no config.toml is written" test ! -e /etc/garm/config.toml
   check "garm.service is installed" grep -qx 'ExecStart=/usr/local/bin/garm -config /etc/garm/config.toml' /etc/systemd/system/garm.service
   check "garm.service runs as gig, Restart=always" bash -c 'grep -qx User=gig /etc/systemd/system/garm.service && grep -qx Restart=always /etc/systemd/system/garm.service'
@@ -283,10 +283,14 @@ if [ "$CONVERGE" -eq 1 ]; then
   # Filled slots survive a re-converge byte for byte.
   printf -- '-----BEGIN FIXTURE KEY-----\nnot-a-secret\n' >/etc/garm/app-key.pem
   printf 'TELEGRAM_TOKEN=fixture\n' >/etc/gig/notify.env
-  key_before="$(sha256sum /etc/garm/app-key.pem /etc/gig/notify.env)"
+  printf 'state\n' >/var/lib/gig/fixture-state
+  chmod 0700 /var/lib/gig
+  key_before="$(sha256sum /etc/garm/app-key.pem /etc/gig/notify.env /var/lib/gig/fixture-state)"
   if run_role "$TMP/converge3.log" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml"; then
     check "filled app-key.pem and notify.env survive a re-converge" \
-      test "$(sha256sum /etc/garm/app-key.pem /etc/gig/notify.env)" = "$key_before"
+      test "$(sha256sum /etc/garm/app-key.pem /etc/gig/notify.env /var/lib/gig/fixture-state)" = "$key_before"
+    check "/var/lib/gig keeps its contents and its drifted mode is corrected" \
+      test "$(stat -c '%a %U:%G' /var/lib/gig)" = "750 gig:gig"
   else
     fail "third converge: $(cat "$TMP/converge3.log")"
   fi

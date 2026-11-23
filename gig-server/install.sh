@@ -246,9 +246,9 @@ install -d -m 0755 -o root -g root /opt/garm /opt/garm/providers.d
 place "$WORK/new/garm-provider-incus" /opt/garm/providers.d/garm-provider-incus 0755 root:root
 BIN_CHANGED=$((BIN_CHANGED | PLACED))
 
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /etc/garm /var/lib/garm
-chmod 0750 /etc/garm /var/lib/garm
-chown "$SERVICE_USER:$SERVICE_USER" /etc/garm /var/lib/garm
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /etc/garm /var/lib/garm /var/lib/gig
+chmod 0750 /etc/garm /var/lib/garm /var/lib/gig
+chown "$SERVICE_USER:$SERVICE_USER" /etc/garm /var/lib/garm /var/lib/gig
 slot /etc/garm/app-key.pem "$SERVICE_USER:$SERVICE_USER"
 
 # garm.service: installed, NOT enabled — gig's engine enables it once it has
