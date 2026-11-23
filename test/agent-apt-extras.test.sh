@@ -68,20 +68,34 @@ fi
 
 # --- Base divergence: the drift the check exists to catch -------------------
 dropped="$(fixture drop-gh)"
-sed -i 's/^APT_EXTRAS="cron gh jq"$/APT_EXTRAS="cron jq"/' "$dropped/grok-box/template.env"
+sed -i 's/^APT_EXTRAS="cron gh jq python3-venv shellcheck"$/APT_EXTRAS="cron jq python3-venv shellcheck"/' "$dropped/grok-box/template.env"
 expect_red drop-gh "$dropped" "drops shared base package 'gh'"
+
+# The agents' toolchain (#38) is base, not vendor: dropping either package from
+# any agent tenant reds, the vendor addition on claude-box notwithstanding.
+novenv="$(fixture drop-python3-venv)"
+sed -i 's/^APT_EXTRAS="cron gh jq zsh python3-venv shellcheck"$/APT_EXTRAS="cron gh jq zsh shellcheck"/' "$novenv/claude-box/template.env"
+expect_red drop-python3-venv "$novenv" "drops shared base package 'python3-venv'"
+
+nolint="$(fixture drop-shellcheck)"
+sed -i 's/^APT_EXTRAS="cron gh jq python3-venv shellcheck"$/APT_EXTRAS="cron gh jq python3-venv"/' "$nolint/kimi-box/template.env"
+expect_red drop-shellcheck "$nolint" "drops shared base package 'shellcheck'"
 
 missing="$(fixture no-apt-extras)"
 sed -i '/^APT_EXTRAS=/d' "$missing/kimi-box/template.env"
 expect_red no-apt-extras "$missing" "declares no APT_EXTRAS"
 
 doubled="$(fixture two-apt-extras)"
-printf 'APT_EXTRAS="cron gh jq tmux"\n' >>"$doubled/codex-box/template.env"
+printf 'APT_EXTRAS="cron gh jq python3-venv shellcheck tmux"\n' >>"$doubled/codex-box/template.env"
 expect_red two-apt-extras "$doubled" "declares APT_EXTRAS 2 times"
 
 # --- A vendor addition is an ordinary, allowed act --------------------------
 vendored="$(fixture vendor-addition)"
-sed -i 's/^APT_EXTRAS="cron gh jq"$/APT_EXTRAS="cron gh jq tmux"/' "$vendored/codex-box/template.env"
+sed -i 's/^APT_EXTRAS="cron gh jq python3-venv shellcheck"$/APT_EXTRAS="cron gh jq python3-venv shellcheck tmux"/' "$vendored/codex-box/template.env"
+# A sed that silently stopped matching would leave this fixture unchanged and
+# still green, so prove the mutation landed before trusting the verdict.
+grep -q '^APT_EXTRAS="cron gh jq python3-venv shellcheck tmux"$' "$vendored/codex-box/template.env" \
+  || fail "vendor-addition fixture did not mutate codex-box/template.env; the sed no longer matches main's APT_EXTRAS"
 expect_green vendor-addition "$vendored"
 
 # --- The ownership boundary -------------------------------------------------

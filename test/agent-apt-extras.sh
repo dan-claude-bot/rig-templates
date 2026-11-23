@@ -9,6 +9,14 @@
 # ordinary Debian packages, so they are ordinary APT_EXTRAS data, and the base
 # below is what every agent tenant carries.
 #
+# The base also holds the agents' unprivileged toolchain, `python3-venv` and
+# `shellcheck` (#38). They were in box's seed image only because box#177 took
+# the tenant's sudo away, and box 0.11.0 (box#253) moves them out of box: the
+# Debian 13 base image ships no pip and marks the system Python externally
+# managed, so an agent that cannot sudo has no other way to get a venv or a
+# shell linter. rig's toolbelt installs neither, so this base is their only
+# supplier.
+#
 # Vendor additions layer ON TOP of the base: claude-box's `zsh` is a vendor
 # addition and stays one. What the check refuses is a tenant DROPPING a base
 # package, because four hand-maintained package lists drift in silence and the
@@ -28,10 +36,11 @@ set -euo pipefail
 
 ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-# The documented base. README.md states it in prose; this array is what CI
-# reads, so the two are changed together or the check is the one telling the
-# truth.
-BASE_PACKAGES=(cron gh jq)
+# The documented base: crew's prerequisites (cron gh jq, #23) and the agents'
+# toolchain (python3-venv shellcheck, #38). README.md states it in prose; this
+# array is what CI reads, so the two are changed together or the check is the
+# one telling the truth.
+BASE_PACKAGES=(cron gh jq python3-venv shellcheck)
 
 # Installing crew's duty engine, expressed as the acts that would do it: a
 # reference to the engine tree, crew's own installer, or the tick entrypoint.
