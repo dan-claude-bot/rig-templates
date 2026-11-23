@@ -16,6 +16,21 @@ jobs:
         run: bash test/agent-apt-extras.test.sh
       - name: labels.conf sets documented in CONTRIBUTING.md
         run: bash test/labels-conf-documented.test.sh
+  # gig-server's install.sh (#36): the refusals, two converges with an empty
+  # diff, and the acceptance checks, as root in a throwaway debian:13. gig is
+  # a fixture built in the test; garm's assets are the real releases.
+  gig-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: refusals, unprivileged
+        run: bash test/gig-server.test.sh
+      - name: converge twice in debian:13
+        run: |
+          docker run --rm -v "$PWD":/src:ro debian:13 bash -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
+            bash /src/test/gig-server.test.sh --converge'
   drill:
     runs-on: ubuntu-latest
     steps:

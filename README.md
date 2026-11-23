@@ -57,7 +57,8 @@ hardening independently of whether an agent is installed.
 
 Machine-role directories are traits-only: their `template.env` allowlist is
 `ROOT_DOOR`, `HOST`, and `JOIN`. They carry no `creds.md`; an `install.sh` is
-optional in the schema but absent from the built-in machine definitions.
+optional in the schema; `gig-server` is the one built-in machine definition
+that carries one (below).
 
 ### Swap: `SWAP_SIZE`
 
@@ -105,6 +106,43 @@ role exists. `drill/drill.sh --crew-member` is the end-to-end evidence —
 crew's installer run credential-free on a converged tenant, with cron
 **armed** rather than merely installed.
 
+### `gig-server` — gig's host (#36)
+
+The first machine role with an `install.sh`. `HOST="yes"` makes rig install
+box and run its host setup; `ROOT_DOOR` and `JOIN` match `runner-server`.
+rig runs `gig-server/install.sh` as root, last, from the definition directory.
+
+| | |
+|---|---|
+| **Inputs** | `GIG_TARBALL` (a gig release source tarball) and `GIG_CONFIG` (heavy-duty/infra's `gig.yaml`): operator-supplied readable paths, because gig and infra are private and rig never fetches config. Missing either exits 2 and prints the invocation: `GIG_TARBALL=… GIG_CONFIG=… rig bootstrap gig-server --users <path>`. |
+| **Verifies first** | box on PATH at 0.11.0 or later; an existing `gig` account is a system UID (≤ `SYS_UID_MAX`) with a `nologin`/`false` shell and not in `incus-admin`; `gig config check` on the input (run from the tarball itself), `host.user` is `gig`, and every pin in `gig.yaml` (`pins.garm` for garm and garm-cli, `pins.garm_provider_incus`) is recorded in `gig-server/checksums`. Every download is checked against that file, never a fetched sidecar. Any refusal happens before anything is installed. |
+| **Places** | gig via its own `install.sh --from` (`/opt/gig/<version>`, `/usr/local/bin/gig`); `/etc/gig/gig.yaml` (0644, replaced only when it differs); system user `gig` (no shell, no home, never in `incus-admin`); `box grant --service gig` with `host.pool` and `host.grant.*`; `garm` and `garm-cli` in `/usr/local/bin`; the provider in `/opt/garm/providers.d/`; `/etc/garm` and `/var/lib/garm` (0750 gig:gig); `garm.service`, installed and **not enabled**; a journald drop-in capping the journal at 2G; then `gig host apply --root` and, as gig, `gig host apply`. `gig.yaml` is placed last among the writes, after the binaries it pins. mikefarah's yq, which gig needs, is placed in `/usr/local/bin` from the same checksums file only when no `yq` is on PATH at all (see below). |
+| **Never places** | Secrets, and garm's `config.toml`: it holds generated secrets, and gig's engine renders it (heavy-duty/gig#4), then enables `garm.service`. |
+| **Slots the operator fills** | `/etc/garm/app-key.pem` (empty, 0600 gig:gig): the GitHub App key, from Bitwarden (heavy-duty/gig#4). `/etc/gig/notify.env` (empty, 0600 root:root): the Telegram slot (heavy-duty/gig#7). Both are created once and never overwritten. |
+| **Re-run** | When the garm or provider binary changes, a running `garm.service` is restarted (`systemctl try-restart`). Idempotent: same inputs, no writes. gig's installer does nothing when the version is current; files are cmp-guarded; box re-converges the grant on every run. A pin bump in `gig.yaml` is refused until a PR here records its sha256. |
+
+The grant runs before `garm.service` exists: a service reads its groups once,
+and one that reaches incus-user before the grant makes an unhardened project
+(heavy-duty/box#281). `GIG_SKIP_HOST_APPLY=1` skips the two `host apply`
+halves for container CI, which has no Incus; CI stubs `box`.
+**yq.** gig finds yq only as `yq` on PATH (no override variable, no
+libexec), so the role cannot wire in a private copy. It uses a mikefarah yq
+v4.54+ already on PATH; refuses, naming the binary, when any other `yq` is
+there (Debian's `yq` package is kislyuk's, a different tool) rather than
+shadowing it for every user of the host; and otherwise places the pinned one.
+
+`GIG_SERVER_ASSET_DIR` reads release assets from a directory instead of
+downloading them, with the same checksums enforced.
+
+**On a host that already carries a rig role** (ci-server): rig keeps one role
+marker, `/etc/rig/role`, and `rig bootstrap gig-server` does not refuse a
+second role. It rewrites the marker to `role=gig-server`, re-runs the join and
+renames the host to `gig-server` unless `--hostname` is given. On such a host,
+run the hook on its own with the same inputs, from a checkout of this
+registry at the pinned commit:
+
+    GIG_TARBALL=/path/gig.tar.gz GIG_CONFIG=/path/gig.yaml bash gig-server/install.sh
+
 ## CI — rig lints every definition on every PR
 
 rig defines what a valid template is (`rig template-lint`, shipped beside
@@ -113,6 +151,10 @@ on every definition on every PR, so a broken definition is refused before it
 can ever reach a mint. The two gates are not redundant: CI protects the
 registry, rig's bootstrap-time parse protects a mint served through
 `RIG_TEMPLATES_REPO`/`_DIR` that CI never saw.
+
+The `gig-server` job runs `test/gig-server.test.sh --converge` as root in a
+throwaway `debian:13` container, against a fixture gig built in the test (gig
+is private; the real tarball is operator-supplied) and the real garm releases.
 
 ## The security trade — in bold, not a footnote
 
