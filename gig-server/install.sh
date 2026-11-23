@@ -34,7 +34,8 @@ YQ_VERSION=v4.54.3
 GARM_URL=https://github.com/cloudbase/garm/releases/download
 PROVIDER_URL=https://github.com/cloudbase/garm-provider-incus/releases/download
 YQ_URL=https://github.com/mikefarah/yq/releases/download
-SAFE_RE='^[A-Za-z0-9._-]+$'
+SAFE_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+BOX_FLOOR=0.11.0
 
 log() { printf '%s: %s\n' "$PROG" "$*"; }
 die() {
@@ -94,29 +95,37 @@ unpack() {
   local listing
   listing="$(tar -tzf "$WORK/dl/$1")" || die 1 "$1: not a readable .tgz"
   [ "$listing" = "$2" ] || die 1 "$1: expected exactly one file '$2', got: $(printf '%s' "$listing" | tr '\n' ' ')"
-  tar -xzf "$WORK/dl/$1" -C "$WORK/new" --no-same-owner -- "$2"
+  tar -xzf "$WORK/dl/$1" -C "$WORK/new" --no-same-owner --no-same-permissions -- "$2"
   if [ ! -f "$WORK/new/$2" ] || [ -L "$WORK/new/$2" ]; then die 1 "$1: $2 is not a regular file"; fi
   chmod 0755 "$WORK/new/$2"
 }
 
-# yq_usable: mikefarah's yq v4.44+ on PATH (gig's own floor).
+# yq_usable: mikefarah's yq v4.54+ on PATH (gig's own floor, lib/config.sh).
 yq_usable() {
   local v
   v="$(yq --version 2>/dev/null || true)"
-  [[ $v =~ mikefarah/yq.*\ version\ v?4\.([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -ge 44 ]
+  [[ $v =~ mikefarah/yq.*\ version\ v?4\.([0-9]+) ]] && [ "$((10#${BASH_REMATCH[1]}))" -ge 54 ]
 }
 
+# gig finds yq only as `yq` on PATH (no override, no libexec), so a private
+# copy cannot be wired in. A yq that is not gig's (Debian's kislyuk yq, an old
+# mikefarah) is refused rather than shadowed for every user of the host.
 YQ_PLACE=0
-if ! yq_usable; then
+if yq_usable; then
+  log "yq: using $(command -v yq)"
+elif command -v yq >/dev/null 2>&1; then
+  die 1 "$(command -v yq) is not mikefarah's yq v4.54+ ($(yq --version 2>&1 | head -n1)); gig needs it as 'yq' on PATH and this role will not shadow another yq — remove it (Debian: apt-get remove yq) or install mikefarah's yq v4.54+"
+else
   fetch yq_linux_amd64 "$YQ_VERSION" "$YQ_URL"
   install -m 0755 "$WORK/dl/yq_linux_amd64" "$WORK/bin/yq"
   YQ_PLACE=1
+  log "yq: will place mikefarah's yq $YQ_VERSION at /usr/local/bin/yq"
 fi
 export PATH="$WORK/bin:$PATH"
 
 # The tarball unpacks here only to run its own `config check` before
 # anything is installed; its install.sh does the real, checked install below.
-tar -xzf "$GIG_TARBALL" -C "$WORK/gig" --no-same-owner 2>/dev/null || die 1 "$GIG_TARBALL: not a readable .tar.gz"
+tar -xzf "$GIG_TARBALL" -C "$WORK/gig" --no-same-owner --no-same-permissions 2>/dev/null || die 1 "$GIG_TARBALL: not a readable .tar.gz"
 mapfile -t tops < <(find "$WORK/gig" -mindepth 1 -maxdepth 1)
 if [ "${#tops[@]}" -ne 1 ] || [ ! -d "${tops[0]}" ] || [ -L "${tops[0]}" ]; then
   die 1 "$GIG_TARBALL: expected exactly one top-level directory"
@@ -156,22 +165,49 @@ fetch garm-provider-incus-linux-amd64.tgz "$PROVIDER_VERSION" "$PROVIDER_URL"
 unpack garm-linux-amd64.tgz garm
 unpack garm-cli-linux-amd64.tgz garm-cli
 unpack garm-provider-incus-linux-amd64.tgz garm-provider-incus
-log "verified: gig.yaml, garm $GARM_VERSION, garm-cli $GARM_VERSION, garm-provider-incus $PROVIDER_VERSION"
+
+# box: on PATH and new enough for `box grant --service` with pool and caps.
+command -v box >/dev/null 2>&1 || die 1 "box is not on PATH; the grant is box's (HOST=yes installs it)"
+BOX_VERSION="$(box version 2>/dev/null | awk '{ print $2; exit }')"
+if ! [[ $BOX_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] ||
+  [ "$(printf '%s\n%s\n' "$BOX_FLOOR" "$BOX_VERSION" | sort -V | head -n1)" != "$BOX_FLOOR" ]; then
+  die 1 "box ${BOX_VERSION:-(unknown)} is older than $BOX_FLOOR, which 'box grant --service --pool --memory --cpu --instances' needs"
+fi
+
+# An existing gig account is adopted only if it is a no-login system account.
+if getent passwd "$SERVICE_USER" >/dev/null; then
+  sys_uid_max="$(awk '$1 == "SYS_UID_MAX" { print $2; exit }' /etc/login.defs 2>/dev/null || true)"
+  [[ $sys_uid_max =~ ^[0-9]+$ ]] || sys_uid_max=999
+  uid="$(getent passwd "$SERVICE_USER" | cut -d: -f3)"
+  shell="$(getent passwd "$SERVICE_USER" | cut -d: -f7)"
+  [ "$uid" -le "$sys_uid_max" ] || die 1 "user $SERVICE_USER exists with uid $uid, above SYS_UID_MAX $sys_uid_max: not a system account; refusing to adopt it"
+  case "$(basename -- "$shell")" in
+    nologin | false) ;;
+    *) die 1 "user $SERVICE_USER exists with login shell $shell; refusing to adopt it (a service account has nologin or false)" ;;
+  esac
+  if id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx incus-admin; then
+    die 1 "$SERVICE_USER is in incus-admin; remove it (gpasswd -d $SERVICE_USER incus-admin) — a service in incus-admin cannot be fenced"
+  fi
+fi
+log "verified: gig.yaml, box $BOX_VERSION, garm $GARM_VERSION, garm-cli $GARM_VERSION, garm-provider-incus $PROVIDER_VERSION"
 
 # --- phase 2: converge the host ----------------------------------------------
 
 [ "$(id -u)" -eq 0 ] || die 1 "must run as root"
 
-# place SRC DEST MODE OWNER:GROUP — replace DEST only when it differs.
+# place SRC DEST MODE OWNER:GROUP — replace DEST only when it differs; sets
+# PLACED=1 when it wrote. Every step is checked: callers need no || true.
+PLACED=0
 place() {
+  PLACED=0
   if ! cmp -s -- "$1" "$2"; then
-    install -m "$3" -o "${4%:*}" -g "${4#*:}" -T -- "$1" "$2"
+    install -m "$3" -o "${4%:*}" -g "${4#*:}" -T -- "$1" "$2" || die 1 "cannot install $2"
     log "placed $2"
+    PLACED=1
     return 0
   fi
-  chmod "$3" -- "$2"
-  chown "$4" -- "$2"
-  return 1
+  chmod "$3" -- "$2" || die 1 "cannot chmod $2"
+  chown "$4" -- "$2" || die 1 "cannot chown $2"
 }
 # slot PATH OWNER:GROUP — an empty 0600 file, created once and never touched.
 slot() {
@@ -182,39 +218,33 @@ slot() {
 }
 systemd_up() { [ -d /run/systemd/system ]; }
 
-if [ "$YQ_PLACE" -eq 1 ]; then
-  place "$WORK/bin/yq" /usr/local/bin/yq 0755 root:root || true
-fi
-
-# gig: its own installer, which does nothing when this version is current.
-bash "$SRC/install.sh" --from "$GIG_TARBALL"
-
-install -d -m 0755 -o root -g root /etc/gig
-place "$GIG_CONFIG" /etc/gig/gig.yaml 0644 root:root || true
-slot /etc/gig/notify.env root:root
-
-# The service user, BEFORE the grant (box grant needs the user) and never in
-# incus-admin (box refuses to fence one, and nothing could).
+# The service user, BEFORE the grant (box grant needs the user).
 if ! getent passwd "$SERVICE_USER" >/dev/null; then
   useradd --system --user-group --no-create-home --home-dir /nonexistent \
     --shell /usr/sbin/nologin "$SERVICE_USER"
   log "created system user $SERVICE_USER"
 fi
-if id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx incus-admin; then
-  die 1 "$SERVICE_USER is in incus-admin; remove it (gpasswd -d $SERVICE_USER incus-admin) — a service in incus-admin cannot be fenced"
-fi
 
 # The grant, BEFORE garm can start: a service reads its groups once, and one
 # reaching incus-user before the grant makes an unhardened project
 # (heavy-duty/box#281). box converges it on every run.
-command -v box >/dev/null 2>&1 || die 1 "box is not on PATH; the grant is box's (HOST=yes installs it)"
 box grant --service "$SERVICE_USER" --pool "$POOL" --pool-size "$POOL_SIZE" \
   --memory "$MEMORY" --cpu "$CPU" --instances "$INSTANCES"
 
-place "$WORK/new/garm" /usr/local/bin/garm 0755 root:root || true
-place "$WORK/new/garm-cli" /usr/local/bin/garm-cli 0755 root:root || true
+if [ "$YQ_PLACE" -eq 1 ]; then
+  place "$WORK/bin/yq" /usr/local/bin/yq 0755 root:root
+fi
+
+# gig: its own installer, which does nothing when this version is current.
+bash "$SRC/install.sh" --from "$GIG_TARBALL"
+
+BIN_CHANGED=0
+place "$WORK/new/garm" /usr/local/bin/garm 0755 root:root
+BIN_CHANGED=$((BIN_CHANGED | PLACED))
+place "$WORK/new/garm-cli" /usr/local/bin/garm-cli 0755 root:root
 install -d -m 0755 -o root -g root /opt/garm /opt/garm/providers.d
-place "$WORK/new/garm-provider-incus" /opt/garm/providers.d/garm-provider-incus 0755 root:root || true
+place "$WORK/new/garm-provider-incus" /opt/garm/providers.d/garm-provider-incus 0755 root:root
+BIN_CHANGED=$((BIN_CHANGED | PLACED))
 
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /etc/garm /var/lib/garm
 chmod 0750 /etc/garm /var/lib/garm
@@ -239,19 +269,35 @@ Group=$SERVICE_USER
 ExecStart=/usr/local/bin/garm -config /etc/garm/config.toml
 Restart=always
 RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/garm /etc/garm
 
 [Install]
 WantedBy=multi-user.target
 EOF
-if place "$WORK/garm.service" /etc/systemd/system/garm.service 0644 root:root && systemd_up; then
+place "$WORK/garm.service" /etc/systemd/system/garm.service 0644 root:root
+if [ "$PLACED" -eq 1 ] && systemd_up; then
   systemctl daemon-reload
+fi
+# A pin bump replaces a running garm's binaries: restart it if it runs.
+if [ "$BIN_CHANGED" -eq 1 ] && systemd_up; then
+  systemctl try-restart garm.service
 fi
 
 printf '[Journal]\nSystemMaxUse=2G\n' >"$WORK/journald.conf"
 install -d -m 0755 -o root -g root /etc/systemd/journald.conf.d
-if place "$WORK/journald.conf" /etc/systemd/journald.conf.d/gig.conf 0644 root:root && systemd_up; then
+place "$WORK/journald.conf" /etc/systemd/journald.conf.d/gig.conf 0644 root:root
+if [ "$PLACED" -eq 1 ] && systemd_up; then
   systemctl try-restart systemd-journald || log "journald restart failed; the cap applies at its next start"
 fi
+
+# gig.yaml LAST among the writes: it names pins the binaries above now
+# match, so a failure earlier never leaves a config ahead of its host.
+install -d -m 0755 -o root -g root /etc/gig
+slot /etc/gig/notify.env root:root
+place "$GIG_CONFIG" /etc/gig/gig.yaml 0644 root:root
 
 # gig's two halves (heavy-duty/gig#19): box's firewall drop-in as root, then
 # gig's profiles in gig's project as gig.
@@ -259,7 +305,7 @@ if [ "${GIG_SKIP_HOST_APPLY:-}" = "1" ]; then
   log "GIG_SKIP_HOST_APPLY=1 — skipping gig host apply (both halves)"
 else
   gig host apply --root /etc/gig/gig.yaml
-  runuser -u "$SERVICE_USER" -- gig host apply /etc/gig/gig.yaml
+  (cd / && runuser -u "$SERVICE_USER" -- gig host apply /etc/gig/gig.yaml)
 fi
 
 log "converged: gig $(gig version), garm $GARM_VERSION, provider $PROVIDER_VERSION; slots to fill: /etc/garm/app-key.pem, /etc/gig/notify.env"

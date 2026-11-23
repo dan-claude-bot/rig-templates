@@ -105,12 +105,12 @@ EOF
 build_gig "$TMP/gig.tar.gz"
 
 # The config: gig's documented shape, the keys the role reads.
-write_config() { # write_config OUT [GARM_PIN] [HOST_USER]
+write_config() { # write_config OUT [GARM_PIN] [HOST_USER] [PROVIDER_PIN] [VERSION]
   cat >"$1" <<EOF
-version: 1
+version: ${5:-1}
 pins:
   garm: ${2:-v0.2.1}
-  garm_provider_incus: v0.1.5
+  garm_provider_incus: ${4:-v0.1.5}
   actions_runner: v2.338.2
   debian_base: images:debian/13/cloud
 host:
@@ -129,6 +129,23 @@ EOF
 write_config "$TMP/gig.yaml"
 write_config "$TMP/unrecorded.yaml" v0.2.2
 write_config "$TMP/wronguser.yaml" v0.2.1 garm
+write_config "$TMP/unrecorded-provider.yaml" v0.2.1 gig v0.1.6
+write_config "$TMP/badversion.yaml" v0.2.1 gig v0.1.5 2
+
+# box is stubbed on PATH: `version` answers BOX_STUB_VERSION, and each grant
+# is recorded so the test reads what ran.
+mkdir -p "$TMP/stubbin" "$TMP/foreignyq"
+cat >"$TMP/stubbin/box" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  version) echo "box \${BOX_STUB_VERSION:-0.11.0} (/opt/box)" ;;
+  grant) printf '%s\n' "\$*" >>"$TMP/box-grant.log" ;;
+  *) exit 2 ;;
+esac
+EOF
+# A foreign yq: Debian's kislyuk yq answers like this.
+printf '#!/bin/sh\necho "yq 3.4.3"\n' >"$TMP/foreignyq/yq"
+chmod 0755 "$TMP/stubbin/box" "$TMP/foreignyq/yq"
 
 # A tampered copy of the asset set: one byte appended to garm's tarball.
 mkdir -p "$TMP/tampered"
@@ -138,7 +155,7 @@ printf 'x' >>"$TMP/tampered/garm-linux-amd64.tgz"
 run_role() { # run_role LOG [ENV=VAL...] — the role, as rig runs it
   local log=$1
   shift
-  (cd "$ROLE" && env GIG_SKIP_HOST_APPLY=1 GIG_SERVER_ASSET_DIR="$ASSETS" "$@" bash ./install.sh) >"$log" 2>&1
+  (cd "$ROLE" && env PATH="$TMP/stubbin:$PATH" GIG_SKIP_HOST_APPLY=1 GIG_SERVER_ASSET_DIR="$ASSETS" "$@" bash ./install.sh) >"$log" 2>&1
 }
 expect_refusal() { # expect_refusal NAME CODE MESSAGE [ENV=VAL...]
   local name=$1 code=$2 msg=$3 rc=0
@@ -160,6 +177,10 @@ expect_refusal missing-config 2 "GIG_CONFIG must name a readable file" GIG_TARBA
 expect_refusal tampered-asset 1 "checksum mismatch" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" GIG_SERVER_ASSET_DIR="$TMP/tampered"
 expect_refusal unrecorded-pin 1 "garm-linux-amd64.tgz v0.2.2 is not recorded" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/unrecorded.yaml"
 expect_refusal wrong-user 1 "host.user is 'garm'" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/wronguser.yaml"
+expect_refusal unrecorded-provider-pin 1 "garm-provider-incus-linux-amd64.tgz v0.1.6 is not recorded" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/unrecorded-provider.yaml"
+expect_refusal config-check 1 "gig config check refused it" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/badversion.yaml"
+expect_refusal box-too-old 1 "box 0.10.0 is older than 0.11.0" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" BOX_STUB_VERSION=0.10.0
+expect_refusal foreign-yq 1 "will not shadow another yq" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" PATH="$TMP/stubbin:$TMP/foreignyq:$PATH"
 if [ "$CONVERGE" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
   expect_refusal not-root 1 "must run as root" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml"
 fi
@@ -174,15 +195,15 @@ if [ "$CONVERGE" -eq 1 ]; then
       [ ! -e /usr/local/bin/garm ] && [ ! -e /opt/garm ] && [ ! -e /etc/garm ] &&
       [ ! -e /etc/systemd/system/garm.service ] && ! getent passwd gig >/dev/null
   }
+  # An existing gig that is not a no-login system account is refused.
+  useradd --uid 1500 --shell /bin/bash --no-create-home gig
+  expect_refusal human-gig 1 "above SYS_UID_MAX" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml"
+  userdel gig
+  useradd --system --shell /bin/bash --no-create-home gig
+  expect_refusal shell-gig 1 "login shell /bin/bash" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml"
+  userdel gig
   check "the refusals above left nothing installed" nothing_installed
-
-  # box is stubbed: it records each grant, so the test reads what ran.
-  cat >/usr/local/bin/box <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>/tmp/box-grant.log
-EOF
-  chmod 0755 /usr/local/bin/box
-  rm -f /tmp/box-grant.log
+  rm -f "$TMP/box-grant.log"
 
   snapshot() { # the converged state, as text
     {
@@ -202,8 +223,9 @@ EOF
     }
   }
 
-  if run_role "$TMP/converge1.log" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml"; then
-    report "PASS — first converge"
+  # The first converge downloads: the role builds the release URLs and curls.
+  if run_role "$TMP/converge1.log" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" GIG_SERVER_ASSET_DIR=; then
+    report "PASS — first converge, through the role's own downloads"
   else
     fail "first converge: $(cat "$TMP/converge1.log")"
   fi
@@ -229,7 +251,7 @@ EOF
   # shellcheck disable=SC2016  # expands in the child bash
   check "gig has no login shell and no home" bash -c '[ "$(getent passwd gig | cut -d: -f6,7)" = "/nonexistent:/usr/sbin/nologin" ] && [ ! -e /nonexistent ]'
   check "box grant ran with gig.yaml's values, on every converge" \
-    test "$(cat /tmp/box-grant.log)" = "$(printf 'grant %s\ngrant %s' "$grant" "$grant")"
+    test "$(cat "$TMP/box-grant.log")" = "$(printf 'grant %s\ngrant %s' "$grant" "$grant")"
   check "/etc/gig/gig.yaml matches the input" cmp -s /etc/gig/gig.yaml "$TMP/gig.yaml"
   check "/etc/gig is 0755 root, gig.yaml 0644" test "$(stat -c '%a %U %a' /etc/gig /etc/gig/gig.yaml | tr '\n' ' ')" = "755 root 755 644 root 644 "
   check "notify.env is empty, 0600 root:root" test "$(stat -c '%s %a %U:%G' /etc/gig/notify.env)" = "0 600 root:root"
@@ -238,7 +260,17 @@ EOF
   check "no config.toml is written" test ! -e /etc/garm/config.toml
   check "garm.service is installed" grep -qx 'ExecStart=/usr/local/bin/garm -config /etc/garm/config.toml' /etc/systemd/system/garm.service
   check "garm.service runs as gig, Restart=always" bash -c 'grep -qx User=gig /etc/systemd/system/garm.service && grep -qx Restart=always /etc/systemd/system/garm.service'
-  check "garm.service is not enabled" bash -c '! ls /etc/systemd/system/*.wants/garm.service >/dev/null 2>&1'
+  # shellcheck disable=SC2016  # these expand in the child bash
+  # No systemd in the container, so this proves the role never enables it:
+  # no enable call in the script and no wants link on disk.
+  check "garm.service is not enabled (no enable call, no wants link)" \
+    bash -c '! grep -q "systemctl enable" "$1" && ! ls /etc/systemd/system/*.wants/garm.service >/dev/null 2>&1' _ "$ROLE/install.sh"
+  check "the first converge placed yq" grep -q 'placed /usr/local/bin/yq' "$TMP/converge1.log"
+  # shellcheck disable=SC2016  # expands in the child bash
+  check "the second converge used the usable yq and placed none" \
+    bash -c 'grep -q "yq: using /usr/local/bin/yq" "$1" && ! grep -q "placed /usr/local/bin/yq" "$1"' _ "$TMP/converge2.log"
+  # shellcheck disable=SC2016  # expands in the child bash
+  check "the unit is hardened" bash -c 'for k in NoNewPrivileges=yes PrivateTmp=yes ProtectSystem=strict "ReadWritePaths=/var/lib/garm /etc/garm"; do grep -qxF "$k" /etc/systemd/system/garm.service || exit 1; done'
   check "journald drop-in caps at 2G" grep -qx 'SystemMaxUse=2G' /etc/systemd/journald.conf.d/gig.conf
   check "garm --version matches the pin" test "$(/usr/local/bin/garm --version 2>&1)" = v0.2.1
   mkdir -p "$TMP/pin"
