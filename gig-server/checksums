@@ -1,13 +1,10 @@
 # gig-server/checksums — the sha256 of every binary install.sh fetches, keyed
 # by asset and version (#36). install.sh refuses any asset or version not
 # listed here and never trusts a sidecar fetched at install time, so a pin
-# bump in gig.yaml is a PR to this file. Values checked 2026-11-21 (garm) and
-# 2026-11-23 (yq) against the published sidecars, which match the downloads.
+# bump is a PR to this file. garm's rows left with #49 (proposal 0012). Values
+# checked 2026-11-23 against the published sidecars, which match the downloads.
 #
 # asset                              version  sha256
-garm-linux-amd64.tgz                 v0.2.1   11176acb8a725f914b9b947891b4837d374fb616195562cc0ad45a7be8b6c746
-garm-cli-linux-amd64.tgz             v0.2.1   983fa54557f3f5ce3aa1eeb2387499f5f823d14512a0559ba888667bc3b3e88e
-garm-provider-incus-linux-amd64.tgz  v0.1.5   1489b5f9b3f01528e338c604c13dabe8321ed6f1bc6de77c7344119d7731c43f
 # mikefarah's yq, which gig needs (v4.54+) to read gig.yaml. gig.yaml does not
 # pin it, so this role does; installed only when no yq at all is on PATH.
 yq_linux_amd64                       v4.54.3  129534601871538efe0ba4c5e62a34fb1d5f469bcb975c4fddeb467d82974973

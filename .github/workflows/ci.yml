@@ -18,7 +18,7 @@ jobs:
         run: bash test/labels-conf-documented.test.sh
   # gig-server's install.sh (#36): the refusals, two converges with an empty
   # diff, and the acceptance checks, as root in a throwaway debian:13. gig is
-  # a fixture built in the test; garm's assets are the real releases.
+  # a fixture built in the test; yq's asset is the real release.
   gig-server:
     runs-on: ubuntu-latest
     steps:
