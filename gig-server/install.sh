@@ -314,6 +314,37 @@ place "$WORK/gig-bake-watch.service" /etc/systemd/system/gig-bake-watch.service 
 UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
 place "$WORK/gig-bake-watch.timer" /etc/systemd/system/gig-bake-watch.timer 0644 root:root
 UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
+# The 5-minute doctor tick (heavy-duty/gig#7, ruling on heavy-duty/gig#40):
+# ONE root unit. gig doctor reads the host, delivers alarms from the root-only
+# notify.env and drops to gig itself (runuser) for its project. Installed,
+# NOT enabled: the operator enables it once notify.env is filled (README).
+install -d -m 0755 -o root -g root /var/lib/gig-doctor
+cat >"$WORK/gig-doctor.service" <<'EOF'
+[Unit]
+Description=gig doctor: sweep, readings, alarms, heartbeat (rig-templates gig-server)
+Documentation=https://github.com/heavy-duty/gig
+After=network-online.target incus.service incus-user.service garm.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gig doctor
+EOF
+cat >"$WORK/gig-doctor.timer" <<'EOF'
+[Unit]
+Description=gig doctor every 5 minutes (rig-templates gig-server)
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+place "$WORK/gig-doctor.service" /etc/systemd/system/gig-doctor.service 0644 root:root
+UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
+place "$WORK/gig-doctor.timer" /etc/systemd/system/gig-doctor.timer 0644 root:root
+UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
 if [ "$UNITS_CHANGED" -eq 1 ] && systemd_up; then
   systemctl daemon-reload
 fi
