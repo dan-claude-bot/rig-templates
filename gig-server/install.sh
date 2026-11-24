@@ -3,10 +3,10 @@
 # heavy-duty/gig#3). rig runs this AS ROOT, last, from this directory; it is
 # equally runnable on its own with the same two inputs (see README).
 #
-# It places gig, its config, garm's binaries, a service user, box's grant for
-# that user and an inert garm.service. It places SLOTS, never secrets:
-# notify.env and app-key.pem are created empty and never overwritten, and
-# garm's config.toml is gig's engine's to render (heavy-duty/gig#4).
+# It places gig, its config, a service user, box's grant for that user and
+# an inert gig-arm.service (proposal 0012, #49). It places SLOTS, never
+# secrets: notify.env, app-key.pem and tailnet-authkey are created empty and never
+# overwritten. A host converged before #49 also loses garm's old layout.
 #
 # Two phases. Everything that can refuse — the inputs, `gig config check`,
 # the pins against ./checksums, every download's sha256 — runs first, in a
@@ -31,8 +31,6 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKSUMS="$HERE/checksums"
 SERVICE_USER=gig
 YQ_VERSION=v4.54.3
-GARM_URL=https://github.com/cloudbase/garm/releases/download
-PROVIDER_URL=https://github.com/cloudbase/garm-provider-incus/releases/download
 YQ_URL=https://github.com/mikefarah/yq/releases/download
 SAFE_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
 BOX_FLOOR=0.11.0
@@ -90,16 +88,6 @@ fetch() {
   [ "$got" = "$want" ] || die 1 "$asset $version: checksum mismatch (recorded $want, got $got) — refusing"
 }
 
-# unpack ASSET BINARY: the one regular file BINARY out of a verified tgz.
-unpack() {
-  local listing
-  listing="$(tar -tzf "$WORK/dl/$1")" || die 1 "$1: not a readable .tgz"
-  [ "$listing" = "$2" ] || die 1 "$1: expected exactly one file '$2', got: $(printf '%s' "$listing" | tr '\n' ' ')"
-  tar -xzf "$WORK/dl/$1" -C "$WORK/new" --no-same-owner --no-same-permissions -- "$2"
-  if [ ! -f "$WORK/new/$2" ] || [ -L "$WORK/new/$2" ]; then die 1 "$1: $2 is not a regular file"; fi
-  chmod 0755 "$WORK/new/$2"
-}
-
 # yq_usable: mikefarah's yq v4.54+ on PATH (gig's own floor, lib/config.sh).
 yq_usable() {
   local v
@@ -151,20 +139,7 @@ POOL_SIZE="$(cfg .host.grant.pool_size)"
 MEMORY="$(cfg .host.grant.memory)"
 CPU="$(cfg .host.grant.cpu)"
 INSTANCES="$(cfg .host.grant.instances)"
-GARM_VERSION="$(cfg .pins.garm)"
-PROVIDER_VERSION="$(cfg .pins.garm_provider_incus)"
 [ "$CFG_USER" = "$SERVICE_USER" ] || die 1 "$GIG_CONFIG: host.user is '$CFG_USER'; this role makes the service user '$SERVICE_USER' (ruled on heavy-duty/gig#11)"
-
-# Every pin is checked against ./checksums before any download.
-recorded_sha garm-linux-amd64.tgz "$GARM_VERSION" >/dev/null
-recorded_sha garm-cli-linux-amd64.tgz "$GARM_VERSION" >/dev/null
-recorded_sha garm-provider-incus-linux-amd64.tgz "$PROVIDER_VERSION" >/dev/null
-fetch garm-linux-amd64.tgz "$GARM_VERSION" "$GARM_URL"
-fetch garm-cli-linux-amd64.tgz "$GARM_VERSION" "$GARM_URL"
-fetch garm-provider-incus-linux-amd64.tgz "$PROVIDER_VERSION" "$PROVIDER_URL"
-unpack garm-linux-amd64.tgz garm
-unpack garm-cli-linux-amd64.tgz garm-cli
-unpack garm-provider-incus-linux-amd64.tgz garm-provider-incus
 
 # box: on PATH and new enough for `box grant --service` with pool and caps.
 command -v box >/dev/null 2>&1 || die 1 "box is not on PATH; the grant is box's (HOST=yes installs it)"
@@ -189,7 +164,7 @@ if getent passwd "$SERVICE_USER" >/dev/null; then
     die 1 "$SERVICE_USER is in incus-admin; remove it (gpasswd -d $SERVICE_USER incus-admin) — a service in incus-admin cannot be fenced"
   fi
 fi
-log "verified: gig.yaml, box $BOX_VERSION, garm $GARM_VERSION, garm-cli $GARM_VERSION, garm-provider-incus $PROVIDER_VERSION"
+log "verified: gig.yaml, box $BOX_VERSION"
 
 # --- phase 2: converge the host ----------------------------------------------
 
@@ -209,10 +184,10 @@ place() {
   chmod "$3" -- "$2" || die 1 "cannot chmod $2"
   chown "$4" -- "$2" || die 1 "cannot chown $2"
 }
-# slot PATH OWNER:GROUP — an empty 0600 file, created once and never touched.
+# slot PATH OWNER:GROUP MODE — an empty file, created once and never touched.
 slot() {
   if [ ! -e "$1" ] && [ ! -L "$1" ]; then
-    install -m 0600 -o "${2%:*}" -g "${2#*:}" /dev/null "$1"
+    install -m "$3" -o "${2%:*}" -g "${2#*:}" /dev/null "$1"
     log "created empty slot $1"
   fi
 }
@@ -225,7 +200,7 @@ if ! getent passwd "$SERVICE_USER" >/dev/null; then
   log "created system user $SERVICE_USER"
 fi
 
-# The grant, BEFORE garm can start: a service reads its groups once, and one
+# The grant, BEFORE gig arm can start: a service reads its groups once, and one
 # reaching incus-user before the grant makes an unhardened project
 # (heavy-duty/box#281). box converges it on every run.
 box grant --service "$SERVICE_USER" --pool "$POOL" --pool-size "$POOL_SIZE" \
@@ -238,49 +213,48 @@ fi
 # gig: its own installer, which does nothing when this version is current.
 bash "$SRC/install.sh" --from "$GIG_TARBALL"
 
-BIN_CHANGED=0
-place "$WORK/new/garm" /usr/local/bin/garm 0755 root:root
-BIN_CHANGED=$((BIN_CHANGED | PLACED))
-place "$WORK/new/garm-cli" /usr/local/bin/garm-cli 0755 root:root
-install -d -m 0755 -o root -g root /opt/garm /opt/garm/providers.d
-place "$WORK/new/garm-provider-incus" /opt/garm/providers.d/garm-provider-incus 0755 root:root
-BIN_CHANGED=$((BIN_CHANGED | PLACED))
+# garm's old layout (before #49): stop it, then remove exactly these paths.
+if [ -e /etc/systemd/system/garm.service ] || [ -L /etc/systemd/system/garm.service ]; then
+  if systemd_up; then
+    systemctl disable --now garm.service || log "could not stop/disable garm.service; removing its unit anyway"
+  fi
+  rm -f -- /etc/systemd/system/garm.service
+  log "removed /etc/systemd/system/garm.service"
+  if systemd_up; then systemctl daemon-reload; fi
+fi
+for old in /usr/local/bin/garm /usr/local/bin/garm-cli /etc/garm /var/lib/garm /opt/garm; do
+  if [ -e "$old" ] || [ -L "$old" ]; then
+    rm -rf -- "$old"
+    log "removed $old"
+  fi
+done
 
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /etc/garm /var/lib/garm /var/lib/gig
-chmod 0750 /etc/garm /var/lib/garm /var/lib/gig
-chown "$SERVICE_USER:$SERVICE_USER" /etc/garm /var/lib/garm /var/lib/gig
-slot /etc/garm/app-key.pem "$SERVICE_USER:$SERVICE_USER"
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /var/lib/gig
+chmod 0750 /var/lib/gig
+chown "$SERVICE_USER:$SERVICE_USER" /var/lib/gig
 
-# garm.service: installed, NOT enabled — gig's engine enables it once it has
-# rendered /etc/garm/config.toml. The grant above ran before this unit exists.
-cat >"$WORK/garm.service" <<EOF
+# gig-arm.service (proposal 0012): installed, NOT enabled — the operator
+# enables it once /etc/gig/app-key.pem is filled and `gig run --apply` ran.
+cat >"$WORK/gig-arm.service" <<EOF
 [Unit]
-Description=garm, gig's runner manager (installed by rig-templates gig-server)
+Description=gig arm: keep the long-lived runner boxes armed (rig-templates gig-server)
 Documentation=https://github.com/heavy-duty/gig
-# The box grant for $SERVICE_USER ran before this unit was installed
-# (gig-server/install.sh); incus-user must be up for the provider's socket.
-After=network-online.target incus.service incus-user.service
+After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/garm/config.toml
 
 [Service]
 User=$SERVICE_USER
 Group=$SERVICE_USER
-ExecStart=/usr/local/bin/garm -config /etc/garm/config.toml
+ExecStart=/usr/local/bin/gig arm --config /etc/gig/gig.yaml
 Restart=always
-RestartSec=5
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ReadWritePaths=/var/lib/garm /etc/garm
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
-place "$WORK/garm.service" /etc/systemd/system/garm.service 0644 root:root
-if [ "$PLACED" -eq 1 ] && systemd_up; then
-  systemctl daemon-reload
-fi
+UNITS_CHANGED=0
+place "$WORK/gig-arm.service" /etc/systemd/system/gig-arm.service 0644 root:root
+UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
 # The hourly bake watcher (heavy-duty/gig#33): installed, NOT enabled. The
 # operator enables the timer after the first manual bake (README).
 cat >"$WORK/gig-bake-watch.service" <<EOF
@@ -309,7 +283,6 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
-UNITS_CHANGED=0
 place "$WORK/gig-bake-watch.service" /etc/systemd/system/gig-bake-watch.service 0644 root:root
 UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
 place "$WORK/gig-bake-watch.timer" /etc/systemd/system/gig-bake-watch.timer 0644 root:root
@@ -323,7 +296,7 @@ cat >"$WORK/gig-doctor.service" <<'EOF'
 [Unit]
 Description=gig doctor: sweep, readings, alarms, heartbeat (rig-templates gig-server)
 Documentation=https://github.com/heavy-duty/gig
-After=network-online.target incus.service incus-user.service garm.service
+After=network-online.target incus.service incus-user.service
 Wants=network-online.target
 
 [Service]
@@ -348,10 +321,6 @@ UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
 if [ "$UNITS_CHANGED" -eq 1 ] && systemd_up; then
   systemctl daemon-reload
 fi
-# A pin bump replaces a running garm's binaries: restart it if it runs.
-if [ "$BIN_CHANGED" -eq 1 ] && systemd_up; then
-  systemctl try-restart garm.service
-fi
 
 printf '[Journal]\nSystemMaxUse=2G\n' >"$WORK/journald.conf"
 install -d -m 0755 -o root -g root /etc/systemd/journald.conf.d
@@ -360,10 +329,15 @@ if [ "$PLACED" -eq 1 ] && systemd_up; then
   systemctl try-restart systemd-journald || log "journald restart failed; the cap applies at its next start"
 fi
 
-# gig.yaml LAST among the writes: it names pins the binaries above now
-# match, so a failure earlier never leaves a config ahead of its host.
+# gig.yaml LAST among the writes, so a failure earlier never leaves a
+# config ahead of its host.
 install -d -m 0755 -o root -g root /etc/gig
-slot /etc/gig/notify.env root:root
+slot /etc/gig/notify.env root:root 0600
+slot /etc/gig/app-key.pem "root:$SERVICE_USER" 0640
+# The deploy lane's tailnet key (proposal 0012 amendment): gig pipes it to
+# `tailscale up` over stdin; the operator fills it with a reusable, ephemeral,
+# pre-approved key tagged tag:deploy.
+slot /etc/gig/tailnet-authkey "root:$SERVICE_USER" 0640
 place "$GIG_CONFIG" /etc/gig/gig.yaml 0644 root:root
 
 # gig's two halves (heavy-duty/gig#19): box's firewall drop-in as root, then
@@ -375,4 +349,4 @@ else
   (cd / && runuser -u "$SERVICE_USER" -- gig host apply /etc/gig/gig.yaml)
 fi
 
-log "converged: gig $(gig version), garm $GARM_VERSION, provider $PROVIDER_VERSION; slots to fill: /etc/garm/app-key.pem, /etc/gig/notify.env"
+log "converged: gig $(gig version); slots to fill: /etc/gig/app-key.pem, /etc/gig/notify.env, /etc/gig/tailnet-authkey (deploy lane only)"

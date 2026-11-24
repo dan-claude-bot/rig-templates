@@ -6,7 +6,7 @@
 # the real contract (--from TARBALL, /opt/gig/<version>, the /usr/local/bin/gig
 # link, nothing done when that version is current) and whose bin/gig answers
 # `version`, `config check` and `host apply`. The real tarball is always
-# operator-supplied. garm's assets are the REAL releases, downloaded once and
+# operator-supplied. yq is the REAL release, downloaded once and
 # checked against gig-server/checksums; the refusals are fed tampered copies
 # through GIG_SERVER_ASSET_DIR.
 #
@@ -38,7 +38,7 @@ check() { # check NAME CMD... — PASS when CMD succeeds
 
 # --- fixtures ----------------------------------------------------------------
 
-# The real garm assets, once, verified against the role's own record.
+# The real yq asset, once, verified against the role's own record.
 ASSETS="$TMP/assets"
 mkdir -p "$ASSETS"
 fetch_real() {
@@ -50,9 +50,6 @@ fetch_real() {
     exit 1
   }
 }
-fetch_real garm-linux-amd64.tgz https://github.com/cloudbase/garm/releases/download/v0.2.1
-fetch_real garm-cli-linux-amd64.tgz https://github.com/cloudbase/garm/releases/download/v0.2.1
-fetch_real garm-provider-incus-linux-amd64.tgz https://github.com/cloudbase/garm-provider-incus/releases/download/v0.1.5
 fetch_real yq_linux_amd64 https://github.com/mikefarah/yq/releases/download/v4.54.3
 
 # The fake gig release: one top-level directory, as GitHub's source tarballs.
@@ -105,16 +102,14 @@ EOF
 build_gig "$TMP/gig.tar.gz"
 
 # The config: gig's documented shape, the keys the role reads.
-write_config() { # write_config OUT [GARM_PIN] [HOST_USER] [PROVIDER_PIN] [VERSION]
+write_config() { # write_config OUT [HOST_USER] [VERSION]
   cat >"$1" <<EOF
-version: ${5:-1}
+version: ${3:-1}
 pins:
-  garm: ${2:-v0.2.1}
-  garm_provider_incus: ${4:-v0.1.5}
   actions_runner: v2.338.2
   debian_base: images:debian/13/cloud
 host:
-  user: ${3:-gig}
+  user: ${2:-gig}
   pool: gig
   network: boxnet
   box_profile: box-profile
@@ -127,10 +122,8 @@ host:
 EOF
 }
 write_config "$TMP/gig.yaml"
-write_config "$TMP/unrecorded.yaml" v0.2.2
-write_config "$TMP/wronguser.yaml" v0.2.1 garm
-write_config "$TMP/unrecorded-provider.yaml" v0.2.1 gig v0.1.6
-write_config "$TMP/badversion.yaml" v0.2.1 gig v0.1.5 2
+write_config "$TMP/wronguser.yaml" garm
+write_config "$TMP/badversion.yaml" gig 2
 
 # box is stubbed on PATH: `version` answers BOX_STUB_VERSION, and each grant
 # is recorded so the test reads what ran.
@@ -147,10 +140,10 @@ EOF
 printf '#!/bin/sh\necho "yq 3.4.3"\n' >"$TMP/foreignyq/yq"
 chmod 0755 "$TMP/stubbin/box" "$TMP/foreignyq/yq"
 
-# A tampered copy of the asset set: one byte appended to garm's tarball.
+# A tampered copy of the asset set: one byte appended to yq.
 mkdir -p "$TMP/tampered"
 cp "$ASSETS"/* "$TMP/tampered/"
-printf 'x' >>"$TMP/tampered/garm-linux-amd64.tgz"
+printf 'x' >>"$TMP/tampered/yq_linux_amd64"
 
 run_role() { # run_role LOG [ENV=VAL...] — the role, as rig runs it
   local log=$1
@@ -174,10 +167,13 @@ expect_refusal() { # expect_refusal NAME CODE MESSAGE [ENV=VAL...]
 
 expect_refusal missing-inputs 2 "rig bootstrap gig-server" GIG_TARBALL= GIG_CONFIG=
 expect_refusal missing-config 2 "GIG_CONFIG must name a readable file" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/nope.yaml"
-expect_refusal tampered-asset 1 "checksum mismatch" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" GIG_SERVER_ASSET_DIR="$TMP/tampered"
-expect_refusal unrecorded-pin 1 "garm-linux-amd64.tgz v0.2.2 is not recorded" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/unrecorded.yaml"
+# The asset is checked only when yq must be placed: hide any yq on PATH.
+mkdir -p "$TMP/noyq"
+for t in env bash sh cat sha256sum cut awk cp mkdir install mktemp rm dirname realpath tr grep tar gzip find id head sort basename getent curl chmod; do
+  if command -v "$t" >/dev/null 2>&1; then ln -sf "$(command -v "$t")" "$TMP/noyq/$t"; fi
+done
+expect_refusal tampered-asset 1 "checksum mismatch" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" GIG_SERVER_ASSET_DIR="$TMP/tampered" PATH="$TMP/stubbin:$TMP/noyq"
 expect_refusal wrong-user 1 "host.user is 'garm'" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/wronguser.yaml"
-expect_refusal unrecorded-provider-pin 1 "garm-provider-incus-linux-amd64.tgz v0.1.6 is not recorded" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/unrecorded-provider.yaml"
 expect_refusal config-check 1 "gig config check refused it" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/badversion.yaml"
 expect_refusal box-too-old 1 "box 0.10.0 is older than 0.11.0" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" BOX_STUB_VERSION=0.10.0
 expect_refusal foreign-yq 1 "will not shadow another yq" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" PATH="$TMP/stubbin:$TMP/foreignyq:$PATH"
@@ -192,8 +188,7 @@ if [ "$CONVERGE" -eq 1 ]; then
 
   nothing_installed() {
     [ ! -e /usr/local/bin/gig ] && [ ! -e /opt/gig ] && [ ! -e /etc/gig ] &&
-      [ ! -e /usr/local/bin/garm ] && [ ! -e /opt/garm ] && [ ! -e /etc/garm ] &&
-      [ ! -e /etc/systemd/system/garm.service ] && ! getent passwd gig >/dev/null
+      [ ! -e /etc/systemd/system/gig-arm.service ] && ! getent passwd gig >/dev/null
   }
   # An existing gig that is not a no-login system account is refused.
   useradd --uid 1500 --shell /bin/bash --no-create-home gig
@@ -205,9 +200,21 @@ if [ "$CONVERGE" -eq 1 ]; then
   check "the refusals above left nothing installed" nothing_installed
   rm -f "$TMP/box-grant.log"
 
+  # A host with garm's old layout (before #49), plus neighbours that must stay.
+  mkdir -p /etc/garm /var/lib/garm/db /opt/garm/providers.d /usr/local/bin /etc/systemd/system
+  printf 'old\n' >/etc/garm/config.toml
+  printf 'old\n' >/etc/garm/app-key.pem
+  printf 'old\n' >/var/lib/garm/db/garm.db
+  printf 'old\n' >/opt/garm/providers.d/garm-provider-incus
+  printf '#!/bin/sh\n' >/usr/local/bin/garm
+  printf '#!/bin/sh\n' >/usr/local/bin/garm-cli
+  printf '[Unit]\n' >/etc/systemd/system/garm.service
+  printf 'keep\n' >/usr/local/bin/garm-other
+  mkdir -p /etc/garm-neighbour && printf 'keep\n' >/etc/garm-neighbour/file
+
   snapshot() { # the converged state, as text
     {
-      find /etc/gig /etc/garm /var/lib/garm /var/lib/gig /var/lib/gig-doctor /opt/gig /opt/garm /usr/local/bin \
+      find /etc/gig /var/lib/gig /var/lib/gig-doctor /opt/gig /usr/local/bin \
         /etc/systemd/system /etc/systemd/journald.conf.d -mindepth 0 2>/dev/null | sort |
         while IFS= read -r p; do
           if [ -L "$p" ]; then
@@ -241,9 +248,21 @@ if [ "$CONVERGE" -eq 1 ]; then
   else
     fail "the second converge changed the host"
   fi
-  if grep -q 'placed\|created' "$TMP/converge2.log"; then
-    fail "the second converge reported a write: $(grep 'placed\|created' "$TMP/converge2.log")"
+  if grep -q 'placed\|created\|removed' "$TMP/converge2.log"; then
+    fail "the second converge reported a write: $(grep 'placed\|created\|removed' "$TMP/converge2.log")"
   fi
+
+  old_gone() {
+    local p
+    for p in /usr/local/bin/garm /usr/local/bin/garm-cli /etc/garm /var/lib/garm /opt/garm /etc/systemd/system/garm.service; do
+      if [ -e "$p" ] || [ -L "$p" ]; then return 1; fi
+    done
+  }
+  check "the old garm layout is removed" old_gone
+  check "the first converge says what it removed" \
+    test "$(grep -c '^gig-server: removed ' "$TMP/converge1.log")" = 6
+  check "paths beside the old layout are untouched" \
+    test "$(cat /usr/local/bin/garm-other /etc/garm-neighbour/file)" = "$(printf 'keep\nkeep')"
 
   grant="--service gig --pool gig --pool-size 200GiB --memory 16GiB --cpu 6 --instances 6"
   check "gig version answers" test "$(gig version)" = "$GIG_VERSION"
@@ -255,16 +274,20 @@ if [ "$CONVERGE" -eq 1 ]; then
   check "/etc/gig/gig.yaml matches the input" cmp -s /etc/gig/gig.yaml "$TMP/gig.yaml"
   check "/etc/gig is 0755 root, gig.yaml 0644" test "$(stat -c '%a %U %a' /etc/gig /etc/gig/gig.yaml | tr '\n' ' ')" = "755 root 755 644 root 644 "
   check "notify.env is empty, 0600 root:root" test "$(stat -c '%s %a %U:%G' /etc/gig/notify.env)" = "0 600 root:root"
-  check "app-key.pem is empty, 0600 gig:gig" test "$(stat -c '%s %a %U:%G' /etc/garm/app-key.pem)" = "0 600 gig:gig"
-  check "/etc/garm, /var/lib/garm and /var/lib/gig are 0750 gig:gig" test "$(stat -c '%a %U:%G' /etc/garm /var/lib/garm /var/lib/gig | sort -u)" = "750 gig:gig"
-  check "no config.toml is written" test ! -e /etc/garm/config.toml
-  check "garm.service is installed" grep -qx 'ExecStart=/usr/local/bin/garm -config /etc/garm/config.toml' /etc/systemd/system/garm.service
-  check "garm.service runs as gig, Restart=always" bash -c 'grep -qx User=gig /etc/systemd/system/garm.service && grep -qx Restart=always /etc/systemd/system/garm.service'
+  check "app-key.pem is empty, 0640 root:gig" test "$(stat -c '%s %a %U:%G' /etc/gig/app-key.pem)" = "0 640 root:gig"
+  check "tailnet-authkey is empty, 0640 root:gig" test "$(stat -c '%s %a %U:%G' /etc/gig/tailnet-authkey)" = "0 640 root:gig"
+  check "/var/lib/gig is 0750 gig:gig" test "$(stat -c '%a %U:%G' /var/lib/gig)" = "750 gig:gig"
+  arm_unit() { # the [Service] and [Install] settings, exactly
+    grep -E '^(User|Group|ExecStart|Restart|RestartSec|After|Wants|WantedBy|Environment)=' /etc/systemd/system/gig-arm.service
+  }
+  check "gig-arm.service carries exactly the contract's settings" \
+    test "$(arm_unit)" = "$(printf '%s\n' After=network-online.target Wants=network-online.target User=gig Group=gig \
+      'ExecStart=/usr/local/bin/gig arm --config /etc/gig/gig.yaml' Restart=always RestartSec=10 WantedBy=multi-user.target)"
   # shellcheck disable=SC2016  # these expand in the child bash
   # No systemd in the container, so this proves the role never enables it:
   # no enable call in the script and no wants link on disk.
-  check "garm.service is not enabled (no enable call, no wants link)" \
-    bash -c '! grep -q "systemctl enable" "$1" && ! ls /etc/systemd/system/*.wants/garm.service >/dev/null 2>&1' _ "$ROLE/install.sh"
+  check "gig-arm.service is not enabled (no enable call, no wants link)" \
+    bash -c '! grep -q "systemctl enable" "$1" && ! ls /etc/systemd/system/*.wants/gig-arm.service >/dev/null 2>&1' _ "$ROLE/install.sh"
   check "the bake watcher units are installed" \
     bash -c 'grep -qxF "ExecStart=/usr/local/bin/gig bake --if-stale" /etc/systemd/system/gig-bake-watch.service && grep -qxF "User=gig" /etc/systemd/system/gig-bake-watch.service && grep -qxF "OnCalendar=hourly" /etc/systemd/system/gig-bake-watch.timer && grep -qxF "Persistent=true" /etc/systemd/system/gig-bake-watch.timer'
   check "the bake watcher timer is not enabled (no wants link)" \
@@ -278,26 +301,19 @@ if [ "$CONVERGE" -eq 1 ]; then
   # shellcheck disable=SC2016  # expands in the child bash
   check "the second converge used the usable yq and placed none" \
     bash -c 'grep -q "yq: using /usr/local/bin/yq" "$1" && ! grep -q "placed /usr/local/bin/yq" "$1"' _ "$TMP/converge2.log"
-  # shellcheck disable=SC2016  # expands in the child bash
-  check "the unit is hardened" bash -c 'for k in NoNewPrivileges=yes PrivateTmp=yes ProtectSystem=strict "ReadWritePaths=/var/lib/garm /etc/garm"; do grep -qxF "$k" /etc/systemd/system/garm.service || exit 1; done'
   check "journald drop-in caps at 2G" grep -qx 'SystemMaxUse=2G' /etc/systemd/journald.conf.d/gig.conf
-  check "garm --version matches the pin" test "$(/usr/local/bin/garm --version 2>&1)" = v0.2.1
-  mkdir -p "$TMP/pin"
-  tar -xzf "$ASSETS/garm-cli-linux-amd64.tgz" -C "$TMP/pin"
-  tar -xzf "$ASSETS/garm-provider-incus-linux-amd64.tgz" -C "$TMP/pin"
-  check "garm-cli is the pinned binary" cmp -s /usr/local/bin/garm-cli "$TMP/pin/garm-cli"
-  check "the provider is the pinned binary" cmp -s /opt/garm/providers.d/garm-provider-incus "$TMP/pin/garm-provider-incus"
   check "host apply was skipped" test ! -e /tmp/gig-host-apply.log
 
   # Filled slots survive a re-converge byte for byte.
-  printf -- '-----BEGIN FIXTURE KEY-----\nnot-a-secret\n' >/etc/garm/app-key.pem
+  printf -- '-----BEGIN FIXTURE KEY-----\nnot-a-secret\n' >/etc/gig/app-key.pem
+  printf 'tskey-auth-fixture\n' >/etc/gig/tailnet-authkey
   printf 'TELEGRAM_TOKEN=fixture\n' >/etc/gig/notify.env
   printf 'state\n' >/var/lib/gig/fixture-state
   chmod 0700 /var/lib/gig
-  key_before="$(sha256sum /etc/garm/app-key.pem /etc/gig/notify.env /var/lib/gig/fixture-state)"
+  key_before="$(sha256sum /etc/gig/app-key.pem /etc/gig/tailnet-authkey /etc/gig/notify.env /var/lib/gig/fixture-state)"
   if run_role "$TMP/converge3.log" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml"; then
-    check "filled app-key.pem and notify.env survive a re-converge" \
-      test "$(sha256sum /etc/garm/app-key.pem /etc/gig/notify.env /var/lib/gig/fixture-state)" = "$key_before"
+    check "filled app-key.pem, tailnet-authkey and notify.env survive a re-converge" \
+      test "$(sha256sum /etc/gig/app-key.pem /etc/gig/tailnet-authkey /etc/gig/notify.env /var/lib/gig/fixture-state)" = "$key_before"
     check "/var/lib/gig keeps its contents and its drifted mode is corrected" \
       test "$(stat -c '%a %U:%G' /var/lib/gig)" = "750 gig:gig"
   else
