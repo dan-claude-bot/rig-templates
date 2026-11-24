@@ -5,7 +5,7 @@
 #
 # It places gig, its config, a service user, box's grant for that user and
 # an inert gig-arm.service (proposal 0012, #49). It places SLOTS, never
-# secrets: notify.env and app-key.pem are created empty and never
+# secrets: notify.env, app-key.pem and tailnet-authkey are created empty and never
 # overwritten. A host converged before #49 also loses garm's old layout.
 #
 # Two phases. Everything that can refuse — the inputs, `gig config check`,
@@ -334,6 +334,10 @@ fi
 install -d -m 0755 -o root -g root /etc/gig
 slot /etc/gig/notify.env root:root 0600
 slot /etc/gig/app-key.pem "root:$SERVICE_USER" 0640
+# The deploy lane's tailnet key (proposal 0012 amendment): gig pipes it to
+# `tailscale up` over stdin; the operator fills it with a reusable, ephemeral,
+# pre-approved key tagged tag:deploy.
+slot /etc/gig/tailnet-authkey "root:$SERVICE_USER" 0640
 place "$GIG_CONFIG" /etc/gig/gig.yaml 0644 root:root
 
 # gig's two halves (heavy-duty/gig#19): box's firewall drop-in as root, then
@@ -345,4 +349,4 @@ else
   (cd / && runuser -u "$SERVICE_USER" -- gig host apply /etc/gig/gig.yaml)
 fi
 
-log "converged: gig $(gig version); slots to fill: /etc/gig/app-key.pem, /etc/gig/notify.env"
+log "converged: gig $(gig version); slots to fill: /etc/gig/app-key.pem, /etc/gig/notify.env, /etc/gig/tailnet-authkey (deploy lane only)"

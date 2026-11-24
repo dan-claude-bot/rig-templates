@@ -275,6 +275,7 @@ if [ "$CONVERGE" -eq 1 ]; then
   check "/etc/gig is 0755 root, gig.yaml 0644" test "$(stat -c '%a %U %a' /etc/gig /etc/gig/gig.yaml | tr '\n' ' ')" = "755 root 755 644 root 644 "
   check "notify.env is empty, 0600 root:root" test "$(stat -c '%s %a %U:%G' /etc/gig/notify.env)" = "0 600 root:root"
   check "app-key.pem is empty, 0640 root:gig" test "$(stat -c '%s %a %U:%G' /etc/gig/app-key.pem)" = "0 640 root:gig"
+  check "tailnet-authkey is empty, 0640 root:gig" test "$(stat -c '%s %a %U:%G' /etc/gig/tailnet-authkey)" = "0 640 root:gig"
   check "/var/lib/gig is 0750 gig:gig" test "$(stat -c '%a %U:%G' /var/lib/gig)" = "750 gig:gig"
   arm_unit() { # the [Service] and [Install] settings, exactly
     grep -E '^(User|Group|ExecStart|Restart|RestartSec|After|Wants|WantedBy|Environment)=' /etc/systemd/system/gig-arm.service
@@ -305,13 +306,14 @@ if [ "$CONVERGE" -eq 1 ]; then
 
   # Filled slots survive a re-converge byte for byte.
   printf -- '-----BEGIN FIXTURE KEY-----\nnot-a-secret\n' >/etc/gig/app-key.pem
+  printf 'tskey-auth-fixture\n' >/etc/gig/tailnet-authkey
   printf 'TELEGRAM_TOKEN=fixture\n' >/etc/gig/notify.env
   printf 'state\n' >/var/lib/gig/fixture-state
   chmod 0700 /var/lib/gig
-  key_before="$(sha256sum /etc/gig/app-key.pem /etc/gig/notify.env /var/lib/gig/fixture-state)"
+  key_before="$(sha256sum /etc/gig/app-key.pem /etc/gig/tailnet-authkey /etc/gig/notify.env /var/lib/gig/fixture-state)"
   if run_role "$TMP/converge3.log" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml"; then
-    check "filled app-key.pem and notify.env survive a re-converge" \
-      test "$(sha256sum /etc/gig/app-key.pem /etc/gig/notify.env /var/lib/gig/fixture-state)" = "$key_before"
+    check "filled app-key.pem, tailnet-authkey and notify.env survive a re-converge" \
+      test "$(sha256sum /etc/gig/app-key.pem /etc/gig/tailnet-authkey /etc/gig/notify.env /var/lib/gig/fixture-state)" = "$key_before"
     check "/var/lib/gig keeps its contents and its drifted mode is corrected" \
       test "$(stat -c '%a %U:%G' /var/lib/gig)" = "750 gig:gig"
   else
