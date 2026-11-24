@@ -207,7 +207,7 @@ if [ "$CONVERGE" -eq 1 ]; then
 
   snapshot() { # the converged state, as text
     {
-      find /etc/gig /etc/garm /var/lib/garm /var/lib/gig /opt/gig /opt/garm /usr/local/bin \
+      find /etc/gig /etc/garm /var/lib/garm /var/lib/gig /var/lib/gig-doctor /opt/gig /opt/garm /usr/local/bin \
         /etc/systemd/system /etc/systemd/journald.conf.d -mindepth 0 2>/dev/null | sort |
         while IFS= read -r p; do
           if [ -L "$p" ]; then
@@ -269,6 +269,11 @@ if [ "$CONVERGE" -eq 1 ]; then
     bash -c 'grep -qxF "ExecStart=/usr/local/bin/gig bake --if-stale" /etc/systemd/system/gig-bake-watch.service && grep -qxF "User=gig" /etc/systemd/system/gig-bake-watch.service && grep -qxF "OnCalendar=hourly" /etc/systemd/system/gig-bake-watch.timer && grep -qxF "Persistent=true" /etc/systemd/system/gig-bake-watch.timer'
   check "the bake watcher timer is not enabled (no wants link)" \
     bash -c '! ls /etc/systemd/system/*.wants/gig-bake-watch.* >/dev/null 2>&1'
+  check "the doctor units are installed (root, every 5 minutes)" \
+    bash -c 'grep -qxF "ExecStart=/usr/local/bin/gig doctor" /etc/systemd/system/gig-doctor.service && ! grep -q "^User=" /etc/systemd/system/gig-doctor.service && grep -qxF "OnCalendar=*:0/5" /etc/systemd/system/gig-doctor.timer'
+  check "the doctor timer is not enabled (no wants link)" \
+    bash -c '! ls /etc/systemd/system/*.wants/gig-doctor.* >/dev/null 2>&1'
+  check "/var/lib/gig-doctor is 0755 root:root (gig doctor keeps it so)" test "$(stat -c '%a %U:%G' /var/lib/gig-doctor)" = "755 root:root"
   check "the first converge placed yq" grep -q 'placed /usr/local/bin/yq' "$TMP/converge1.log"
   # shellcheck disable=SC2016  # expands in the child bash
   check "the second converge used the usable yq and placed none" \
