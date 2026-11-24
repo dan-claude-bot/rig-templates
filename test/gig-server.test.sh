@@ -265,6 +265,10 @@ if [ "$CONVERGE" -eq 1 ]; then
   # no enable call in the script and no wants link on disk.
   check "garm.service is not enabled (no enable call, no wants link)" \
     bash -c '! grep -q "systemctl enable" "$1" && ! ls /etc/systemd/system/*.wants/garm.service >/dev/null 2>&1' _ "$ROLE/install.sh"
+  check "the bake watcher units are installed" \
+    bash -c 'grep -qxF "ExecStart=/usr/local/bin/gig bake --if-stale" /etc/systemd/system/gig-bake-watch.service && grep -qxF "User=gig" /etc/systemd/system/gig-bake-watch.service && grep -qxF "OnCalendar=hourly" /etc/systemd/system/gig-bake-watch.timer && grep -qxF "Persistent=true" /etc/systemd/system/gig-bake-watch.timer'
+  check "the bake watcher timer is not enabled (no wants link)" \
+    bash -c '! ls /etc/systemd/system/*.wants/gig-bake-watch.* >/dev/null 2>&1'
   check "the first converge placed yq" grep -q 'placed /usr/local/bin/yq' "$TMP/converge1.log"
   # shellcheck disable=SC2016  # expands in the child bash
   check "the second converge used the usable yq and placed none" \

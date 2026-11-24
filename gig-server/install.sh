@@ -281,6 +281,42 @@ place "$WORK/garm.service" /etc/systemd/system/garm.service 0644 root:root
 if [ "$PLACED" -eq 1 ] && systemd_up; then
   systemctl daemon-reload
 fi
+# The hourly bake watcher (heavy-duty/gig#33): installed, NOT enabled. The
+# operator enables the timer after the first manual bake (README).
+cat >"$WORK/gig-bake-watch.service" <<EOF
+[Unit]
+Description=gig bake --if-stale: rebake goldens whose inputs moved (rig-templates gig-server)
+Documentation=https://github.com/heavy-duty/gig
+After=network-online.target incus.service incus-user.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=$SERVICE_USER
+Group=$SERVICE_USER
+Environment=HOME=/var/lib/gig
+ExecStart=/usr/local/bin/gig bake --if-stale
+EOF
+cat >"$WORK/gig-bake-watch.timer" <<'EOF'
+[Unit]
+Description=Hourly gig bake --if-stale (rig-templates gig-server)
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+UNITS_CHANGED=0
+place "$WORK/gig-bake-watch.service" /etc/systemd/system/gig-bake-watch.service 0644 root:root
+UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
+place "$WORK/gig-bake-watch.timer" /etc/systemd/system/gig-bake-watch.timer 0644 root:root
+UNITS_CHANGED=$((UNITS_CHANGED | PLACED))
+if [ "$UNITS_CHANGED" -eq 1 ] && systemd_up; then
+  systemctl daemon-reload
+fi
 # A pin bump replaces a running garm's binaries: restart it if it runs.
 if [ "$BIN_CHANGED" -eq 1 ] && systemd_up; then
   systemctl try-restart garm.service
