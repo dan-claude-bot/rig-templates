@@ -37,7 +37,7 @@ umask 022
 PROG=crew-server
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKSUMS="$HERE/checksums"
-CREW_VERSION=0.1.4-rc18
+CREW_VERSION=0.1.4-rc19
 CREW_URL=https://github.com/heavy-duty/crew/releases/download
 BOX_FLOOR=0.11.0
 SERVICE_GROUP=crew
@@ -175,4 +175,4 @@ if ! check_out="$(crew service check 2>&1)"; then
 fi
 printf '%s\n' "$check_out"
 
-log "converged: crew $CREW_VERSION; the floor is http://$BIND:$PORT/ — its password is in /etc/crew/floor.env (root:$SERVICE_GROUP, 0640); no fleets yet: New fleet on the floor makes the first"
+log "converged: crew $CREW_VERSION; the floor is http://$BIND:$PORT/ — its password is in /etc/crew/floor.env (root:$SERVICE_GROUP, 0640); no fleets yet: New fleet on the floor makes the first, and its Credentials → Engine gives the engine its GitHub App"
