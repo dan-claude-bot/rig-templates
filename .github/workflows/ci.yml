@@ -31,6 +31,21 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
             bash /src/test/gig-server.test.sh --converge'
+  # crew-server's install.sh (#46): the refusals, two converges with an empty
+  # diff, and the service path through a stub, as root in a throwaway
+  # debian:13. crew's artifact is the real public release.
+  crew-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: refusals, unprivileged
+        run: bash test/crew-server.test.sh
+      - name: converge twice in debian:13
+        run: |
+          docker run --rm -v "$PWD":/src:ro debian:13 bash -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
+            bash /src/test/crew-server.test.sh --converge'
   drill:
     runs-on: ubuntu-latest
     steps:

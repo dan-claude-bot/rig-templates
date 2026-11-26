@@ -57,8 +57,8 @@ hardening independently of whether an agent is installed.
 
 Machine-role directories are traits-only: their `template.env` allowlist is
 `ROOT_DOOR`, `HOST`, and `JOIN`. They carry no `creds.md`; an `install.sh` is
-optional in the schema; `gig-server` is the one built-in machine definition
-that carries one (below).
+optional in the schema; `gig-server` and `crew-server` are the built-in
+machine definitions that carry one (below).
 
 ### Swap: `SWAP_SIZE`
 
@@ -143,6 +143,50 @@ registry at the pinned commit:
 
     GIG_TARBALL=/path/gig.tar.gz GIG_CONFIG=/path/gig.yaml bash gig-server/install.sh
 
+### `crew-server` — a machine that runs crew (#46)
+
+A box host with crew installed from a pinned, checksummed release and set up
+as the machine's one service (heavy-duty/crew#822). `HOST="yes"` makes rig
+install box and run its host setup; `ROOT_DOOR` and `JOIN` match
+`gig-server`. rig runs `crew-server/install.sh` as root, last, from the
+definition directory.
+
+**crew sets itself up; the role never duplicates it.** `crew service setup`
+makes the `crew` account and group, `/var/lib/crew`, `/etc/crew/service.conf`,
+the box grant (`box grant --service crew --share crew`, with caps), the
+`/etc/sudoers.d/crew` rule for group `crew`, `crew-floor.service`, the tick,
+restart and reset timers, and `/etc/crew/floor.env` with the floor's password,
+generated once and kept. It is idempotent, and `crew service check` reads it
+all back. The role adds crew itself, the host's values for setup, and the
+operators.
+
+| | |
+|---|---|
+| **Inputs** (environment, all optional) | `CREW_OPERATORS`: comma-separated existing local users to put in group `crew`; an unknown user exits 2. `CREW_PORT` (default 8420). `CREW_BIND` (default: this host's tailnet IPv4 from `tailscale ip -4`, because the floor is reached over the tailnet; with neither, exit 2). `CREW_INSTANCES`, `CREW_MEMORY`, `CREW_CPU`, `CREW_POOL` with `CREW_POOL_SIZE`: the grant's caps, passed to setup as the matching flags; unset means crew's defaults (6 instances, ¾ of RAM, every CPU). `CREW_SERVER_ASSET_DIR`: read the artifact from a directory instead of downloading it. `CREW_SKIP_SERVICE=1`: install crew only (container CI). |
+| **Verifies first** | Every input's shape; the operators exist; box on PATH at 0.11.0 or later; the release artifact `crew-<version>.sh` against the sha256 in `crew-server/checksums`, never the release's sidecar. An unrecorded version is refused, so a crew bump is a PR here. Any refusal happens before anything is installed. |
+| **Places** | crew via its own installer (`/opt/crew/versions/<version>`, `/usr/local/bin/crew`), skipped when that version is already current; then `crew service setup --port … --bind … [caps]` on every run; the operators in group `crew` (`usermod -aG`; the role removes nobody). Then `crew service check` must read `service: clean`, or the converge fails with its output. |
+| **Never places** | A fleet, a member or a credential. A crew server starts with no fleets (heavy-duty/crew#831): fleets are made from the floor (New fleet), members in its roster, credentials through its Credentials or `crew creds`. The role writes nothing under `/var/lib/crew/fleets`. |
+| **The floor** | `http://<CREW_BIND>:<CREW_PORT>/`, printed at the end of the converge. User and password are in `/etc/crew/floor.env` (0640 root:crew), read as root; the role prints where, never the value. An operator in group `crew` runs plain `crew …` with no password; anyone else gets crew's refusal naming the group. A group change takes effect at the user's next login. |
+| **Re-run** | Idempotent. crew's installer is skipped when the version is current, setup reports every unit `same`, and an operator already in the group is left alone. |
+| **Removal** | `sudo crew service teardown --purge` stops and removes the units, revokes and purges the box grant, and removes the sudoers rule, the account, the group and the data. crew's files stay; remove them with `sudo rm -rf /opt/crew /usr/local/bin/crew`. |
+
+The pin is `CREW_VERSION` in `install.sh`: `0.1.4-rc17`, the candidate of
+crew's seven-day run (heavy-duty/crew#753). `0.1.4` final, promoted from it by
+stamps only, is a PR that records its sha256 and moves the pin.
+
+**Read on a real host** (heavy-duty/infra's drill host, through rig's box
+install with `host=yes`): `crew service check` reads `service: clean`; a
+second converge reports every unit `same`; an operator runs `crew status` with
+no password and a user outside the group is refused; the floor answers on
+`CREW_BIND:CREW_PORT` with no fleets and New fleet; `/var/lib/crew/fleets` is
+empty; `crew service teardown --purge` leaves nothing behind. CI cannot read
+these: containers have neither Incus nor systemd.
+
+On a host that already carries a rig role, run the hook on its own with the
+same inputs, as for `gig-server`:
+
+    CREW_OPERATORS=alice,bob bash crew-server/install.sh
+
 ## CI — rig lints every definition on every PR
 
 rig defines what a valid template is (`rig template-lint`, shipped beside
@@ -155,6 +199,9 @@ registry, rig's bootstrap-time parse protects a mint served through
 The `gig-server` job runs `test/gig-server.test.sh --converge` as root in a
 throwaway `debian:13` container, against a fixture gig built in the test (gig
 is private; the real tarball is operator-supplied) and the real yq release.
+The `crew-server` job does the same with `test/crew-server.test.sh
+--converge` and the real crew release artifact, under `CREW_SKIP_SERVICE=1`;
+the service verbs go through a stub `crew` that records them.
 
 ## The security trade — in bold, not a footnote
 
