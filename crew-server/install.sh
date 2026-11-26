@@ -175,4 +175,12 @@ if ! check_out="$(crew service check 2>&1)"; then
 fi
 printf '%s\n' "$check_out"
 
-log "converged: crew $CREW_VERSION; the floor is http://$BIND:$PORT/ — its password is in /etc/crew/floor.env (root:$SERVICE_GROUP, 0640); no fleets yet: New fleet on the floor makes the first, and its Credentials → Engine gives the engine its GitHub App"
+# The last line fits the host (heavy-duty/crew#885): "no fleets yet" only on a
+# host whose service carries none.
+FLEETS="$(find "${CREW_DATA_DIR:-/var/lib/crew}/fleets" -mindepth 2 -maxdepth 2 -name fleet.roster 2>/dev/null | awk -F/ '{ print $(NF-1) }' | sort | paste -sd' ' -)"
+if [ -n "$FLEETS" ]; then
+  NEXT="fleets: $FLEETS — Members, Repositories and Credentials on the floor"
+else
+  NEXT="no fleets yet: New fleet on the floor makes the first, and its Credentials → Engine gives the engine its GitHub App"
+fi
+log "converged: crew $CREW_VERSION; the floor is http://$BIND:$PORT/ — its password is in /etc/crew/floor.env (root:$SERVICE_GROUP, 0640); $NEXT"
