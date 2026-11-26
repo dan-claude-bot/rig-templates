@@ -205,6 +205,7 @@ EOF
     # shellcheck disable=SC2016  # expands in the child bash
     check "...and adds no operator twice" bash -c '! grep -q "added op46" "$1"' _ "$TMP/svc2.log"
     check "...and with a fleet, the last line names it" grep -qF "; fleets: demo — Members, Repositories and Credentials on the floor" "$TMP/svc2.log"
+    # shellcheck disable=SC2016  # expands in the child bash
     check "...and never says no fleets yet" bash -c '! grep -q "no fleets yet" "$1"' _ "$TMP/svc2.log"
   else
     fail "service re-run: $(cat "$TMP/svc2.log")"
