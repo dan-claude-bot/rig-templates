@@ -1,14 +1,17 @@
 # crew-server/checksums — the sha256 of the crew release artifact install.sh
 # installs, keyed by asset and version (#46). install.sh refuses any version
 # not listed here and never trusts the release's .sha256 sidecar at install
-# time, so a crew bump is a PR to this file. Values checked 2026-11-26 (rc17, rc18) against
+# time, so a crew bump is a PR to this file. Values checked 2026-11-26 (rc17, rc18, rc19) against
 # the published sidecars, which match the downloads.
 #
 # asset                 version      sha256
 # 0.1.4-rc17: the candidate the role was first read on (#46).
 crew-0.1.4-rc17.sh      0.1.4-rc17   5b030ffc88891877d1712ed69f68b993cca201fe232d9d30d186b5d08075f29a
 # 0.1.4-rc18: rc17 plus heavy-duty/crew#859 (service teardown --purge, found by
-# this role's real-host reading) — the candidate crew's seven-day run is held on
+# this role's real-host reading).
+crew-0.1.4-rc18.sh      0.1.4-rc18   90bd63aedd8c19e5311febc4acc8a1f1f763ab3512508fd91da85f810819abef
+# 0.1.4-rc19: rc18 plus heavy-duty/crew#865 (the engine reads GitHub as a GitHub
+# App, given on the floor) — the candidate crew's seven-day run is held on
 # (heavy-duty/crew#753 G4, G6). 0.1.4 final, promoted from it by stamps only, is
 # added when it is published.
-crew-0.1.4-rc18.sh      0.1.4-rc18   90bd63aedd8c19e5311febc4acc8a1f1f763ab3512508fd91da85f810819abef
+crew-0.1.4-rc19.sh      0.1.4-rc19   881a07acaeefb1ae97d01b0fca594576b1d6ceaf41bd4a62d4bda11d98af7b89
