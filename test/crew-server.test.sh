@@ -59,9 +59,10 @@ grep -v "^$ASSET " "$ROLE/checksums" >"$TMP/unrecorded/checksums"
 mkdir -p "$TMP/stubbin" "$TMP/notailscale"
 cat >"$TMP/stubbin/box" <<'EOF'
 #!/usr/bin/env bash
+# As box 0.11.0: --version answers, and there is no `version` verb.
 case "$1" in
-  version) echo "box ${BOX_STUB_VERSION:-0.11.0} (/opt/box)" ;;
-  *) exit 2 ;;
+  --version | -V) echo "box ${BOX_STUB_VERSION:-0.11.0} (/opt/box)" ;;
+  *) echo "box: unknown command '$1'" >&2; exit 2 ;;
 esac
 EOF
 cat >"$TMP/stubbin/tailscale" <<'EOF'
@@ -104,6 +105,7 @@ expect_refusal pool-alone 2 "CREW_POOL and CREW_POOL_SIZE go together" CREW_POOL
 expect_refusal tampered-artifact 1 "checksum mismatch" CREW_SERVER_ASSET_DIR="$TMP/tampered"
 ROLE_DIR="$TMP/unrecorded" expect_refusal unrecorded-version 1 "is not recorded in crew-server/checksums"
 expect_refusal box-too-old 1 "box 0.10.0 is older than 0.11.0" BOX_STUB_VERSION=0.10.0
+expect_refusal box-unreadable 1 "box --version answers no version ('garbled')" BOX_STUB_VERSION=garbled
 if [ "$CONVERGE" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
   expect_refusal not-root 1 "must run as root"
   # CREW_SKIP_SERVICE needs no tailnet: it never starts the floor.

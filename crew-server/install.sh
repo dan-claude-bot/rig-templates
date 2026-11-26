@@ -125,10 +125,13 @@ GOT="$(sha256sum -- "$WORK/$ASSET" | cut -d' ' -f1)"
 
 # box: on PATH and new enough for crew's `box grant --service` with caps.
 command -v box >/dev/null 2>&1 || die 1 "box is not on PATH; crew's grant is box's (HOST=yes installs it)"
-BOX_VERSION="$(box version 2>/dev/null | awk '{ print $2; exit }')"
-if ! [[ $BOX_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] ||
-  [ "$(printf '%s\n%s\n' "$BOX_FLOOR" "$BOX_VERSION" | sort -V | head -n1)" != "$BOX_FLOOR" ]; then
-  die 1 "box ${BOX_VERSION:-(unknown)} is older than $BOX_FLOOR, which crew service setup needs"
+# `box --version` (box has no `version` verb). A box that answers nothing
+# usable reads as unknown and is refused below, never a silent exit.
+BOX_VERSION="$(box --version 2>/dev/null | awk '{ print $2; exit }' || true)"
+[[ $BOX_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] ||
+  die 1 "box --version answers no version ('${BOX_VERSION:-nothing}'); crew service setup needs box $BOX_FLOOR or later"
+if [ "$(printf '%s\n%s\n' "$BOX_FLOOR" "$BOX_VERSION" | sort -V | head -n1)" != "$BOX_FLOOR" ]; then
+  die 1 "box $BOX_VERSION is older than $BOX_FLOOR, which crew service setup needs"
 fi
 log "verified: $ASSET (sha256 $GOT), box $BOX_VERSION"
 
@@ -144,7 +147,7 @@ else
   CREW_YES=1 bash "$WORK/$ASSET" || die 1 "crew's installer failed"
   log "installed crew $CREW_VERSION"
 fi
-INSTALLED="$(crew --version 2>/dev/null | awk '{ print $2; exit }')"
+INSTALLED="$(crew --version 2>/dev/null | awk '{ print $2; exit }' || true)"
 [ "$INSTALLED" = "$CREW_VERSION" ] || die 1 "crew --version answers '${INSTALLED:-nothing}', not $CREW_VERSION"
 
 if [ "$SKIP_SERVICE" -eq 1 ]; then
