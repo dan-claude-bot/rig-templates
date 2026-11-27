@@ -125,15 +125,16 @@ write_config "$TMP/gig.yaml"
 write_config "$TMP/wronguser.yaml" garm
 write_config "$TMP/badversion.yaml" gig 2
 
-# box is stubbed on PATH: `version` answers BOX_STUB_VERSION, and each grant
-# is recorded so the test reads what ran.
+# box is stubbed on PATH: `--version` answers BOX_STUB_VERSION, as box 0.11.0
+# does — there is no `version` verb (#52) — and each grant is recorded so the
+# test reads what ran.
 mkdir -p "$TMP/stubbin" "$TMP/foreignyq"
 cat >"$TMP/stubbin/box" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
-  version) echo "box \${BOX_STUB_VERSION:-0.11.0} (/opt/box)" ;;
+  --version | -V) echo "box \${BOX_STUB_VERSION:-0.11.0} (/opt/box)" ;;
   grant) printf '%s\n' "\$*" >>"$TMP/box-grant.log" ;;
-  *) exit 2 ;;
+  *) echo "box: unknown command '\$1'" >&2; exit 2 ;;
 esac
 EOF
 # A foreign yq: Debian's kislyuk yq answers like this.
@@ -176,6 +177,7 @@ expect_refusal tampered-asset 1 "checksum mismatch" GIG_TARBALL="$TMP/gig.tar.gz
 expect_refusal wrong-user 1 "host.user is 'garm'" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/wronguser.yaml"
 expect_refusal config-check 1 "gig config check refused it" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/badversion.yaml"
 expect_refusal box-too-old 1 "box 0.10.0 is older than 0.11.0" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" BOX_STUB_VERSION=0.10.0
+expect_refusal box-unreadable 1 "box --version answers no version ('garbled')" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" BOX_STUB_VERSION=garbled
 expect_refusal foreign-yq 1 "will not shadow another yq" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml" PATH="$TMP/stubbin:$TMP/foreignyq:$PATH"
 if [ "$CONVERGE" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
   expect_refusal not-root 1 "must run as root" GIG_TARBALL="$TMP/gig.tar.gz" GIG_CONFIG="$TMP/gig.yaml"

@@ -143,10 +143,14 @@ INSTANCES="$(cfg .host.grant.instances)"
 
 # box: on PATH and new enough for `box grant --service` with pool and caps.
 command -v box >/dev/null 2>&1 || die 1 "box is not on PATH; the grant is box's (HOST=yes installs it)"
-BOX_VERSION="$(box version 2>/dev/null | awk '{ print $2; exit }')"
-if ! [[ $BOX_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] ||
-  [ "$(printf '%s\n%s\n' "$BOX_FLOOR" "$BOX_VERSION" | sort -V | head -n1)" != "$BOX_FLOOR" ]; then
-  die 1 "box ${BOX_VERSION:-(unknown)} is older than $BOX_FLOOR, which 'box grant --service --pool --memory --cpu --instances' needs"
+# `box --version`: box has no `version` verb (#52). `|| true`, so an answer
+# that can't be read is refused by name below, never a silent exit under
+# pipefail.
+BOX_VERSION="$(box --version 2>/dev/null | awk '{ print $2; exit }' || true)"
+[[ $BOX_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] ||
+  die 1 "box --version answers no version ('${BOX_VERSION:-nothing}'); 'box grant --service --pool --memory --cpu --instances' needs box $BOX_FLOOR or later"
+if [ "$(printf '%s\n%s\n' "$BOX_FLOOR" "$BOX_VERSION" | sort -V | head -n1)" != "$BOX_FLOOR" ]; then
+  die 1 "box $BOX_VERSION is older than $BOX_FLOOR, which 'box grant --service --pool --memory --cpu --instances' needs"
 fi
 
 # An existing gig account is adopted only if it is a no-login system account.
