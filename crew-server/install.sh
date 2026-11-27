@@ -177,7 +177,13 @@ printf '%s\n' "$check_out"
 
 # The last line fits the host (heavy-duty/crew#885): "no fleets yet" only on a
 # host whose service carries none.
-FLEETS="$(find "${CREW_DATA_DIR:-/var/lib/crew}/fleets" -mindepth 2 -maxdepth 2 -name fleet.roster 2>/dev/null | awk -F/ '{ print $(NF-1) }' | sort | paste -sd' ' -)"
+# A host with no fleets has no fleets/ directory: find's non-zero exit must
+# not end the converge under pipefail.
+FLEETS=""
+FLEETS_DIR="${CREW_DATA_DIR:-/var/lib/crew}/fleets"
+if [ -d "$FLEETS_DIR" ]; then
+  FLEETS="$( { find "$FLEETS_DIR" -mindepth 2 -maxdepth 2 -name fleet.roster 2>/dev/null || true; } | awk -F/ '{ print $(NF-1) }' | sort | paste -sd' ' -)"
+fi
 if [ -n "$FLEETS" ]; then
   NEXT="fleets: $FLEETS — Members, Repositories and Credentials on the floor"
 else

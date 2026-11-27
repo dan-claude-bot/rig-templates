@@ -197,7 +197,7 @@ EOF
     grep -qF "the floor is http://100.101.102.103:8420/ — its password is in /etc/crew/floor.env" "$TMP/svc1.log"
   check "with no fleet, the last line says so" grep -qF "; no fleets yet: New fleet on the floor makes the first" "$TMP/svc1.log"
   # A host whose service carries a fleet is told its fleets, not "no fleets yet" (crew#885).
-  mkdir -p /var/lib/crew/fleets/demo && touch /var/lib/crew/fleets/demo/fleet.roster
+  mkdir -p /var/lib/crew/fleets/demo && touch /var/lib/crew/fleets/demo/{fleet.roster,fleet.conf,repos.txt}
   : >"$TMP/service.log"
   if svc "$TMP/svc2.log" CREW_BIND=10.0.0.5 CREW_PORT=9000; then
     check "a re-run converges setup again, with CREW_BIND and CREW_PORT" \
