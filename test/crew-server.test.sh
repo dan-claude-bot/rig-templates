@@ -195,12 +195,18 @@ EOF
   check "the operator is in group crew" bash -c 'id -nG op46 | tr " " "\n" | grep -qx crew'
   check "the converge names the floor and where its password is" \
     grep -qF "the floor is http://100.101.102.103:8420/ — its password is in /etc/crew/floor.env" "$TMP/svc1.log"
+  check "with no fleet, the last line says so" grep -qF "; no fleets yet: New fleet on the floor makes the first" "$TMP/svc1.log"
+  # A host whose service carries a fleet is told its fleets, not "no fleets yet" (crew#885).
+  mkdir -p /var/lib/crew/fleets/demo && touch /var/lib/crew/fleets/demo/{fleet.roster,fleet.conf,repos.txt}
   : >"$TMP/service.log"
   if svc "$TMP/svc2.log" CREW_BIND=10.0.0.5 CREW_PORT=9000; then
     check "a re-run converges setup again, with CREW_BIND and CREW_PORT" \
       grep -qxF "service setup --port 9000 --bind 10.0.0.5" "$TMP/service.log"
     # shellcheck disable=SC2016  # expands in the child bash
     check "...and adds no operator twice" bash -c '! grep -q "added op46" "$1"' _ "$TMP/svc2.log"
+    check "...and with a fleet, the last line names it" grep -qF "; fleets: demo — Members, Repositories and Credentials on the floor" "$TMP/svc2.log"
+    # shellcheck disable=SC2016  # expands in the child bash
+    check "...and never says no fleets yet" bash -c '! grep -q "no fleets yet" "$1"' _ "$TMP/svc2.log"
   else
     fail "service re-run: $(cat "$TMP/svc2.log")"
   fi
